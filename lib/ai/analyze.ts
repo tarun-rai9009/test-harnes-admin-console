@@ -2,7 +2,7 @@ import "server-only";
 
 import { analyzeWithOpenAI } from "@/lib/ai/openai";
 import { analyzeWithHeuristics } from "@/lib/ai/heuristics";
-import { getOpenAiApiKey } from "@/lib/env";
+import { isAiLayerConfigured } from "@/lib/env";
 import type { IntentAnalysisResult, UtteranceContext } from "@/lib/ai/types";
 
 /**
@@ -23,7 +23,7 @@ export async function analyzeUserUtterance(
   }
 
   if (context?.expectingFieldKey) {
-    if (getOpenAiApiKey()) {
+    if (isAiLayerConfigured()) {
       try {
         return await analyzeWithOpenAI(trimmed, context);
       } catch {
@@ -41,7 +41,7 @@ export async function analyzeUserUtterance(
     };
   }
 
-  if (getOpenAiApiKey()) {
+  if (isAiLayerConfigured()) {
     try {
       return await analyzeWithOpenAI(trimmed, context);
     } catch {

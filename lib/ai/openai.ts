@@ -1,6 +1,13 @@
 import "server-only";
 
-import { getOpenAiApiKey } from "@/lib/env";
+import { resolveAzureOpenAiDeploymentName } from "@/lib/ai/azure-deployment";
+import {
+  getAzureOpenAiApiKey,
+  getAzureOpenAiApiVersion,
+  getAzureOpenAiEndpoint,
+  getOpenAiApiKey,
+  usesAzureOpenAi,
+} from "@/lib/env";
 import {
   buildFieldAnswerPrompt,
   INTENT_ANALYSIS_SYSTEM,
@@ -11,7 +18,7 @@ import type { IntentAnalysisResult, UtteranceContext } from "@/lib/ai/types";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const REQUEST_TIMEOUT_MS = 25_000;
 
-function getModel(): string {
+function getOpenAiComModel(): string {
   return process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
 }
 
@@ -25,30 +32,102 @@ function extractJsonObject(content: string): unknown {
   return JSON.parse(trimmed.slice(start, end + 1)) as unknown;
 }
 
-async function callChatCompletionsJson(userContent: string): Promise<unknown> {
+type ChatBody = {
+  temperature: number;
+  max_tokens: number;
+  response_format: { type: "json_object" };
+  messages: { role: string; content: string }[];
+  model?: string;
+};
+
+function buildChatBody(userContent: string): ChatBody {
+  const base: ChatBody = {
+    temperature: 0.2,
+    max_tokens: 600,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: INTENT_ANALYSIS_SYSTEM },
+      { role: "user", content: userContent },
+    ],
+  };
+  if (!usesAzureOpenAi()) {
+    base.model = getOpenAiComModel();
+  }
+  return base;
+}
+
+async function resolveChatUrl(): Promise<{
+  url: string;
+  headers: Record<string, string>;
+}> {
+  if (usesAzureOpenAi()) {
+    const endpoint = getAzureOpenAiEndpoint();
+    const key = getAzureOpenAiApiKey();
+    const apiVersion = getAzureOpenAiApiVersion();
+    if (!endpoint || !key) {
+      throw new Error(
+        "Azure OpenAI: set AZURE_OPENAI_ENDPOINT and an API key (AZURE_OPENAI_API_KEY or OPENAI_API_KEY)",
+      );
+    }
+    const deployment = await resolveAzureOpenAiDeploymentName(endpoint, key);
+    const dep = encodeURIComponent(deployment);
+    const ver = encodeURIComponent(apiVersion);
+    const url = `${endpoint}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
+    return {
+      url,
+      headers: {
+        "api-key": key,
+        "Content-Type": "application/json",
+      },
+    };
+  }
+
   const key = getOpenAiApiKey();
   if (!key) {
     throw new Error("OPENAI_API_KEY is not set");
   }
-
-  const response = await fetch(OPENAI_URL, {
-    method: "POST",
+  return {
+    url: OPENAI_URL,
     headers: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: getModel(),
-      temperature: 0.2,
-      max_tokens: 600,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: INTENT_ANALYSIS_SYSTEM },
-        { role: "user", content: userContent },
-      ],
-    }),
+  };
+}
+
+async function callChatCompletionsJson(userContent: string): Promise<unknown> {
+  const { url, headers } = await resolveChatUrl();
+
+  const logLlm =
+    process.env.NODE_ENV === "development" || process.env.LLM_DEBUG === "1";
+  if (logLlm) {
+    let host = "unknown";
+    try {
+      host = new URL(url).host;
+    } catch {
+      /* ignore */
+    }
+    console.info("[llm]", {
+      event: "calling_chat_completions",
+      provider: usesAzureOpenAi() ? "azure_openai" : "openai_com",
+      host,
+    });
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(buildChatBody(userContent)),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+
+  if (logLlm && response.ok) {
+    console.info("[llm]", {
+      event: "chat_completions_http_ok",
+      provider: usesAzureOpenAi() ? "azure_openai" : "openai_com",
+      status: response.status,
+    });
+  }
 
   const text = await response.text();
   if (!response.ok) {

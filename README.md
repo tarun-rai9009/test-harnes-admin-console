@@ -41,12 +41,16 @@ Copy `.env.example` to `.env.local` and fill in values.
 | `ZINNIA_BASE_URL` | REST API origin (e.g. `https://dev.api.zinnia.io`) |
 | `ZINNIA_TOKEN_URL` | OAuth token endpoint for client credentials |
 | `ZINNIA_CLIENT_ID` / `ZINNIA_CLIENT_SECRET` | OAuth client (server-only) |
-| `OPENAI_API_KEY` | AI features (server-only) |
+| `OPENAI_API_KEY` | OpenAI.com API key (Bearer), or Azure key if using Azure |
+| `AZURE_OPENAI_ENDPOINT` | Optional. If set (e.g. `https://resource.openai.azure.com`), chat uses Azure OpenAI |
+| `AZURE_OPENAI_DEPLOYMENT` | Optional; Azure deployment id. If omitted, the app calls Azure’s deployments list API and picks a chat deployment (or falls back to `gpt-4o-mini`) |
+| `AZURE_OPENAI_API_KEY` | Optional; defaults to `OPENAI_API_KEY` / `AI_API_KEY` for the `api-key` header |
+| `AZURE_OPENAI_API_VERSION` | Optional; default `2024-08-01-preview` |
 
 ### Configuration and errors
 
 - **Zinnia:** All four Zinnia variables must be set, or carrier/datapoint calls throw and the chat surfaces a user-facing error (no in-memory mocks).
-- **`isMockMode()`** in `lib/env.ts` is true only when `OPENAI_API_KEY` (or `AI_API_KEY`) is missing (AI layer unavailable).
+- **AI:** **`isMockMode()`** is true when the AI layer is not configured: no `OPENAI_API_KEY` (or `AI_API_KEY`) for OpenAI.com, or Azure is selected (`AZURE_OPENAI_ENDPOINT` set) but endpoint or API key is missing. Azure deployment can be omitted (auto-discovered).
 
 OAuth tokens are obtained server-side via `POST` to `ZINNIA_TOKEN_URL`, cached in memory until shortly before expiry (`lib/zinnia/auth.ts`). Bearer tokens are never hardcoded.
 

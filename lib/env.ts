@@ -36,13 +36,65 @@ export function getZinniaTokenAudience(): string {
   return isNonEmpty(v) ? v.trim() : "https://dev.api.zinnia.io";
 }
 
-/** OpenAI key for the AI layer (server-side only). */
+/** OpenAI API key for api.openai.com (Bearer), or Azure key when using Azure. */
 export function getOpenAiApiKey(): string | undefined {
   const v = process.env.OPENAI_API_KEY ?? process.env.AI_API_KEY;
   return isNonEmpty(v) ? v.trim() : undefined;
 }
 
-/** True when the AI layer has no API key (server-side). */
+/** When set, chat completions use Azure OpenAI instead of api.openai.com. */
+export function usesAzureOpenAi(): boolean {
+  return isNonEmpty(process.env.AZURE_OPENAI_ENDPOINT);
+}
+
+function trimTrailingSlashes(s: string): string {
+  return s.replace(/\/+$/, "");
+}
+
+/** Azure resource endpoint, e.g. https://your-resource.openai.azure.com */
+export function getAzureOpenAiEndpoint(): string | undefined {
+  const v = process.env.AZURE_OPENAI_ENDPOINT;
+  return isNonEmpty(v) ? trimTrailingSlashes(v.trim()) : undefined;
+}
+
+/**
+ * Azure deployment name for chat completions.
+ * Prefer AZURE_OPENAI_DEPLOYMENT; falls back to OPENAI_MODEL if set.
+ */
+export function getAzureOpenAiDeployment(): string | undefined {
+  const v =
+    process.env.AZURE_OPENAI_DEPLOYMENT?.trim() ||
+    process.env.OPENAI_MODEL?.trim();
+  return isNonEmpty(v) ? v : undefined;
+}
+
+/** Azure API version query param (see Azure OpenAI REST docs). */
+export function getAzureOpenAiApiVersion(): string {
+  const v = process.env.AZURE_OPENAI_API_VERSION;
+  return isNonEmpty(v) ? v.trim() : "2024-08-01-preview";
+}
+
+/** Key for Azure `api-key` header (or OPENAI_API_KEY / AI_API_KEY). */
+export function getAzureOpenAiApiKey(): string | undefined {
+  const v =
+    process.env.AZURE_OPENAI_API_KEY ??
+    process.env.OPENAI_API_KEY ??
+    process.env.AI_API_KEY;
+  return isNonEmpty(v) ? v.trim() : undefined;
+}
+
+/** AI intent/extraction is available (OpenAI.com or Azure with endpoint + key). */
+export function isAiLayerConfigured(): boolean {
+  if (usesAzureOpenAi()) {
+    return (
+      isNonEmpty(getAzureOpenAiEndpoint()) &&
+      isNonEmpty(getAzureOpenAiApiKey())
+    );
+  }
+  return isNonEmpty(getOpenAiApiKey());
+}
+
+/** True when the AI layer cannot run (no key / incomplete Azure config). */
 export function isMockMode(): boolean {
-  return !getOpenAiApiKey();
+  return !isAiLayerConfigured();
 }
