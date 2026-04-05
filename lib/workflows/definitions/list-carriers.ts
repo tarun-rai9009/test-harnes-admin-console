@@ -17,8 +17,7 @@ export const listCarriersWorkflow: WorkflowDefinition = {
     const MAX_ROWS = 50;
     if (n === 0) {
       return {
-        message:
-          "There aren’t any carriers on file yet. Once you add carriers, they’ll appear in this list.",
+        message: "No carriers on file.",
         summaryLines: [],
       };
     }
@@ -26,11 +25,11 @@ export const listCarriersWorkflow: WorkflowDefinition = {
     const table = carrierListToSummaryTable(slice);
     let message: string;
     if (n === 1) {
-      message = "Here’s the carrier currently on file.";
+      message = "1 carrier on file.";
     } else if (n > MAX_ROWS) {
-      message = `You have ${n} carriers on file. I’m showing the first ${MAX_ROWS} below so the list stays easy to scan.`;
+      message = `${n} carriers — showing first ${MAX_ROWS}.`;
     } else {
-      message = `Here are your ${n} carriers on file.`;
+      message = `${n} carriers.`;
     }
     return {
       message,

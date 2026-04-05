@@ -1,0 +1,784 @@
+openapi: 3.0.3
+info:
+  title: Zinnia Admin Console Middleware API
+  version: 1.0.0
+
+tags:
+  - name: Carrier
+    description: Carrier API (draft creation, CRUD, optional list filters, publish/activate, versions)
+  - name: Data points
+    description: Reference data and allowed values by datapoint key
+
+paths:
+  /v1/carriers/draft:
+    post:
+      tags: [Carrier]
+      summary: Create a new carrier draft
+      operationId: createCarrierDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCarrierDraftRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCarrierResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestValidation'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/carriers:
+    get:
+      tags: [Carrier]
+      summary: List carriers with optional filters
+      operationId: listCarriers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/StatusEnum'
+        - name: carrierName
+          in: query
+          schema:
+            type: string
+        - name: lastUpdatedFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: lastUpdatedTo
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: parentCompanyId
+          in: query
+          schema:
+            type: string
+        - name: updatedBy
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CarrierListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestMessage'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/carriers/{carrierCode}:
+    parameters:
+      - $ref: '#/components/parameters/CarrierCodePath'
+    get:
+      tags: [Carrier]
+      summary: Get a carrier by carrier code
+      operationId: getCarrierByCode
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarrierResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestValidation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags: [Carrier]
+      summary: Update an existing carrier
+      operationId: updateCarrier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCarrierRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarrierResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestValidation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Carrier]
+      summary: Delete a carrier
+      operationId: deleteCarrier
+      responses:
+        '204':
+          description: No Content
+        '400':
+          $ref: '#/components/responses/BadRequestValidation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/datapoints:
+    get:
+      tags: [Data points]
+      summary: Get all reference data
+      description: |
+        Returns every datapoint enum name (`DataPointsEnum`) mapped to its allowed value → display label map in one response.
+        No parameters.
+      operationId: getAllDatapointReferenceData
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  additionalProperties:
+                    type: string
+              example:
+                ENTITY_TYPE:
+                  CORPORATION: Corporation
+                PRODUCT_TYPE:
+                  Term Life: Term Life
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  parameters:
+    CarrierCodePath:
+      name: carrierCode
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Z0-9]{4}$'
+      description: Four-character uppercase alphanumeric carrier code.
+
+  schemas:
+    StatusEnum:
+      type: string
+      enum: [DRAFT, PUBLISHED]
+
+    EntityTypeEnum:
+      type: string
+      description: JSON uses display labels per enum JsonValue (not Java enum constant names).
+      enum:
+        - Sole Proprietorship
+        - General Partnership
+        - Limited Partnership
+        - C Corporation
+        - S Corporation
+        - Limited Liability Company
+        - Charitable Organization
+        - E State
+        - Trust
+        - Corporation
+        - Insurance Company
+        - Unknown
+
+    LineOfBusinessEnum:
+      type: string
+      description: JSON uses display labels per enum JsonValue.
+      enum:
+        - Life
+        - Annuity
+        - Health
+        - P&C
+        - Disability
+        - Long Term Care
+        - Retirement
+        - Worksite Benefits
+        - Other
+
+    ProductTypeEnum:
+      type: string
+      enum:
+        - Term Life
+        - Whole Life
+        - Universal Life
+        - Variable Annuity
+        - Fixed Annuity
+
+    CountryCodeEnum:
+      type: string
+      enum: [US, CA, MX, GB, IN, AU, Other]
+
+    AddressTypeEnum:
+      type: string
+      enum:
+        - Primary
+        - Mailing
+        - Physical
+        - Billing
+        - Registered
+        - Headquarters
+        - Remittance
+        - Branch
+
+    PhoneTypeEnum:
+      type: string
+      enum:
+        - Main
+        - Work
+        - Mobile
+        - Fax
+        - Toll Free
+        - Support
+        - Claims
+        - Billing
+        - Escalation
+        - Other
+
+    EmailTypeEnum:
+      type: string
+      enum:
+        - Primary
+        - Support
+        - Claims
+        - Billing
+        - Service
+        - Escalation
+        - Operations
+        - Other
+
+    HolidayTypeEnum:
+      type: string
+      enum:
+        - Fixed Date
+        - Floating
+        - Observed
+        - Ad Hoc
+
+    RatingEnum:
+      type: string
+      enum:
+        - A++
+        - A+
+        - A
+        - A-
+        - B++
+        - B+
+        - B
+        - B-
+        - C++
+        - C+
+        - C
+        - C-
+        - D
+        - E
+        - F
+        - NR
+
+    IdentifierTypeEnum:
+      type: string
+      enum:
+        - NAIC Number
+        - TAX ID
+        - EIN
+        - PAYORID
+        - CUSIP
+        - LEI
+        - REGISTRATIONNUMBER
+
+    TpaNonTpaEnum:
+      type: string
+      enum: [TPA, Non TPA]
+
+    YnEnum:
+      type: string
+      enum: [Y, N]
+
+    ValidationErrorResponse:
+      type: object
+      description: Standard validation / client error payload (HTTP 400).
+      properties:
+        code:
+          type: integer
+          description: |
+            Numeric API error code (e.g. 400001 field validation, 400004 invalid JSON/body).
+        message:
+          type: string
+          example: Request contains invalid fields
+        traceId:
+          type: string
+          format: uuid
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, issue]
+            properties:
+              field:
+                type: string
+                description: JSON path or parameter name.
+              issue:
+                type: string
+                description: Human-readable explanation.
+
+    ApiMessageErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+
+    CreateCarrierDraftRequest:
+      type: object
+      required: [carrierCode, entityType, carrierName, organizationName]
+      properties:
+        lineOfBusiness:
+          $ref: '#/components/schemas/LineOfBusinessEnum'
+        productTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductTypeEnum'
+        carrierCode:
+          type: string
+          minLength: 4
+          maxLength: 4
+          pattern: '^[A-Z0-9]{4}$'
+          example: A1B2
+        ultimateParentCompanyId:
+          type: string
+          nullable: true
+        parentCompanyId:
+          type: string
+          nullable: true
+        entityType:
+          $ref: '#/components/schemas/EntityTypeEnum'
+        carrierName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        organizationName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        organizationDba:
+          type: string
+          maxLength: 255
+          nullable: true
+
+    CreateCarrierResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        carrierName:
+          type: string
+        carrierCode:
+          type: string
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+
+    UpdateCarrierRequest:
+      type: object
+      description: |
+        `addresses`, `phones`, and `emails` are each limited to at most 5 items (bean validation Size max 5).
+      properties:
+        base:
+          $ref: '#/components/schemas/CarrierBase'
+        connectors:
+          $ref: '#/components/schemas/ConnectorsSection'
+        addresses:
+          type: array
+          maxItems: 5
+          description: At most 5 postal addresses.
+          items:
+            $ref: '#/components/schemas/CarrierAddress'
+        phones:
+          type: array
+          maxItems: 5
+          description: At most 5 phone rows.
+          items:
+            $ref: '#/components/schemas/CarrierPhone'
+        emails:
+          type: array
+          maxItems: 5
+          description: At most 5 email rows.
+          items:
+            $ref: '#/components/schemas/CarrierEmail'
+
+    CarrierBase:
+      type: object
+      description: Mutable carrier attributes (no carrierCode on update; use path).
+      properties:
+        carrierId:
+          type: string
+        secondaryCarrierCode:
+          type: string
+          pattern: '^[A-Z0-9]{4}$'
+        entityType:
+          $ref: '#/components/schemas/EntityTypeEnum'
+        carrierName:
+          type: string
+        ultimateParentCompanyId:
+          type: string
+        parentCompanyId:
+          type: string
+        organizationName:
+          type: string
+        organizationDba:
+          type: string
+        organizationShortName:
+          type: string
+        urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarrierUrlRow'
+        logoAssetReference:
+          type: string
+        identifiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarrierIdentifier'
+        regulatory:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarrierRegulatory'
+        businessHolidays:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarrierBusinessHoliday'
+        hoursOfOperation:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarrierHoursOfOperation'
+        lineOfBusiness:
+          $ref: '#/components/schemas/LineOfBusinessEnum'
+        productTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductTypeEnum'
+
+    CreateCarrier:
+      allOf:
+        - $ref: '#/components/schemas/CarrierBase'
+        - type: object
+          required: [carrierCode]
+          properties:
+            carrierCode:
+              type: string
+              minLength: 4
+              maxLength: 4
+              pattern: '^[A-Z0-9]{4}$'
+
+    CarrierUrlRow:
+      type: object
+      properties:
+        organizationDomainName:
+          type: string
+          example: portal.acme-insurance.com
+        carrierLoginUrl:
+          type: string
+          format: uri
+          example: https://portal.acme-insurance.com/carrier/login
+        agentLoginUrl:
+          type: string
+          format: uri
+        customerLoginUrl:
+          type: string
+          format: uri
+
+    ConnectorsSection:
+      type: object
+      properties:
+        dtccIds:
+          type: array
+          items:
+            $ref: '#/components/schemas/DtccConnectorId'
+        c2cConnectedCarriers:
+          type: array
+          items:
+            $ref: '#/components/schemas/C2cConnectedCarrier'
+
+    DtccConnectorId:
+      type: object
+      required: [participantId, locationId]
+      properties:
+        participantId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,30}$'
+          example: participant-ACME-01
+        locationId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,30}$'
+          example: location-NYC-01
+
+    C2cConnectedCarrier:
+      type: object
+      required: [participantId, locationId]
+      properties:
+        participantId:
+          type: string
+        locationId:
+          type: string
+
+    CarrierIdentifier:
+      type: object
+      required: [identifierType, identifierValue]
+      properties:
+        identifierType:
+          $ref: '#/components/schemas/IdentifierTypeEnum'
+        identifierValue:
+          type: string
+          example: '12345'
+
+    CarrierRegulatory:
+      type: object
+      properties:
+        foundedYear:
+          type: integer
+        lineOfBusiness:
+          $ref: '#/components/schemas/LineOfBusinessEnum'
+        authorizedJurisdictionStates:
+          type: array
+          items:
+            type: string
+        rating:
+          $ref: '#/components/schemas/RatingEnum'
+        tpaNonTpa:
+          $ref: '#/components/schemas/TpaNonTpaEnum'
+        isC2CRplParticipant:
+          $ref: '#/components/schemas/YnEnum'
+        use1035YP:
+          $ref: '#/components/schemas/YnEnum'
+
+    CarrierBusinessHoliday:
+      type: object
+      required: [holidayName, holidayType, dateOrOccurrence]
+      properties:
+        holidayName:
+          type: string
+        holidayType:
+          $ref: '#/components/schemas/HolidayTypeEnum'
+        dateOrOccurrence:
+          type: string
+          example: '11-15'
+
+    CarrierHoursOfOperation:
+      type: object
+      required: [businessHourStart, businessHourEnd, businessDays]
+      properties:
+        businessHourStart:
+          type: string
+          example: '09:00'
+        businessHourEnd:
+          type: string
+          example: '17:00'
+        businessDays:
+          type: string
+          example: Mon-Fri
+        businessHoursTimeZone:
+          type: string
+          example: America/New_York
+
+    CarrierAddress:
+      type: object
+      required: [addressLine1, city]
+      properties:
+        addressType:
+          $ref: '#/components/schemas/AddressTypeEnum'
+        addressLine1:
+          type: string
+        addressLine2:
+          type: string
+        addressLine3:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        addressZipCode:
+          type: string
+        addressZipCodeExt:
+          type: string
+        addressCountry:
+          $ref: '#/components/schemas/CountryCodeEnum'
+        addressEffectiveDate:
+          type: string
+          format: date
+        addressEndDate:
+          type: string
+          format: date
+
+    CarrierPhone:
+      type: object
+      required: [dialNumber]
+      properties:
+        phoneType:
+          $ref: '#/components/schemas/PhoneTypeEnum'
+        countryCode:
+          type: string
+          example: '+1'
+        areaCode:
+          type: string
+        dialNumber:
+          type: string
+        extension:
+          type: string
+        phoneEffectiveDate:
+          type: string
+          format: date
+        phoneEndDate:
+          type: string
+          format: date
+
+    CarrierEmail:
+      type: object
+      required: [emailAddress]
+      properties:
+        emailType:
+          $ref: '#/components/schemas/EmailTypeEnum'
+        emailAddress:
+          type: string
+          format: email
+          example: support@acme-insurance.com
+        emailEffectiveDate:
+          type: string
+          format: date
+        emailEndDate:
+          type: string
+          format: date
+
+    CarrierResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        carrierName:
+          type: string
+        carrierCode:
+          type: string
+        version:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        base:
+          $ref: '#/components/schemas/CreateCarrier'
+        connectors:
+          $ref: '#/components/schemas/ConnectorsSection'
+        addresses:
+          type: array
+          maxItems: 5
+          description: At most 5 postal addresses.
+          items:
+            $ref: '#/components/schemas/CarrierAddress'
+        phones:
+          type: array
+          maxItems: 5
+          description: At most 5 phone rows.
+          items:
+            $ref: '#/components/schemas/CarrierPhone'
+        emails:
+          type: array
+          maxItems: 5
+          description: At most 5 email rows.
+          items:
+            $ref: '#/components/schemas/CarrierEmail'
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date
+          description: ISO-8601 date (`java.time.LocalDate`).
+        updatedBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date
+          description: ISO-8601 date (`java.time.LocalDate`).
+
+    CarrierListResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        carrierName:
+          type: string
+        carrierCode:
+          type: string
+        ultimateParentCompanyId:
+          type: string
+          nullable: true
+        parentCompanyId:
+          type: string
+          nullable: true
+        version:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        lastUpdated:
+          type: string
+          format: date
+          description: ISO-8601 date (`java.time.LocalDate`).
+        updatedBy:
+          type: string
+
+  responses:
+    BadRequestValidation:
+      description: Validation failed (bean validation, JSON parse, business rules, etc.)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+    BadRequestMessage:
+      description: Bad request (plain message JSON)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiMessageErrorResponse'
+    BadRequestSpringBinding:
+      description: Bad request (e.g. invalid path enum binding — Spring default error shape possible)
+      content:
+        application/json:
+          schema:
+            type: object
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiMessageErrorResponse'
+    Conflict:
+      description: Conflict (e.g. duplicate carrier)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiMessageErrorResponse'
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiMessageErrorResponse'

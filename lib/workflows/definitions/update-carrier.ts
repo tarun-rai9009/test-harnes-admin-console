@@ -1,6 +1,5 @@
 import { updateCarrier } from "@/lib/zinnia/carriers";
 import type { CarrierDetails } from "@/types/zinnia/carriers";
-import { carrierDetailsToSummaryFields } from "@/lib/workflows/carrier-summary-fields";
 import { UPDATE_CARRIER_FIELD_GROUPS } from "@/lib/workflows/definitions/update-carrier-catalog";
 import {
   buildUpdateConfirmationRowsFromData,
@@ -10,11 +9,9 @@ import {
 import type { WorkflowDefinition } from "@/lib/workflows/workflow-types";
 
 function buildUpdateConfirmationMessage(): string {
-  return [
-    "Here’s a recap of what we’re about to save.",
-    "",
-    "If everything looks right, reply yes and I’ll apply it. If not, reply no and we’ll adjust.",
-  ].join("\n");
+  return ["Review the summary.", "Reply **yes** to apply, **no** to edit."].join(
+    "\n",
+  );
 }
 
 export const updateCarrierWorkflow: WorkflowDefinition = {
@@ -49,8 +46,11 @@ export const updateCarrierWorkflow: WorkflowDefinition = {
     const code = d.carrierCode?.trim() || "";
     const who = code ? `${name} (${code})` : name;
     return {
-      message: `Done — your updates for ${who} are saved.`,
-      summaryFields: carrierDetailsToSummaryFields(d),
+      message: `Saved: ${who}.`,
+      summaryFields: [
+        { label: "Carrier code", value: code || "—" },
+        { label: "Carrier name", value: name },
+      ],
     };
   },
 };

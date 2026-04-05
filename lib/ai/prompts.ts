@@ -1,10 +1,12 @@
-export const INTENT_ANALYSIS_SYSTEM = `You help classify messages for a carrier operations assistant used by non-technical business users.
+import { CHAT_AGENT_TITLE } from "@/lib/branding";
+
+export const INTENT_ANALYSIS_SYSTEM = `You help classify messages for "${CHAT_AGENT_TITLE}" — an admin-console chat agent for carrier operations, used by non-technical business users.
 
 Your job is ONLY:
 1) Choose the user's intent from the allowed list.
 2) Extract field values the user clearly stated. Never guess or fill missing IDs, names, or codes.
-3) Optionally add a brief friendly naturalPreamble (one sentence) that acknowledges them — no fake data.
-4) Optionally add suggestedFollowUp: a softer way to ask for the next detail — must NOT invent facts.
+3) Optional naturalPreamble: max ~6 words, acknowledges them — no fake data.
+4) Optional suggestedFollowUp: max ~10 words for the next step — must NOT invent facts.
 
 Allowed intent values (exact strings):
 - create_carrier_draft — user wants to add or draft a new carrier.

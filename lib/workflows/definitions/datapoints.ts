@@ -18,8 +18,7 @@ export const showDatapointsWorkflow: WorkflowDefinition = {
     const n = items.length;
     if (n === 0) {
       return {
-        message:
-          "The reference list is empty right now. If you expected values here, your administrator can help confirm when they’re loaded.",
+        message: "Reference list is empty.",
         summaryLines: [],
       };
     }
@@ -39,8 +38,8 @@ export const showDatapointsWorkflow: WorkflowDefinition = {
     });
     const message =
       n > MAX_ROWS
-        ? `Here are ${n} reference values for forms and dropdowns. I’m showing the first ${MAX_ROWS} so it’s easy to read.`
-        : `Here are ${n} reference values you can use when filling out forms.`;
+        ? `${n} reference values — showing first ${MAX_ROWS}.`
+        : `${n} reference values.`;
     return {
       message,
       summaryTable: { columns, rows },

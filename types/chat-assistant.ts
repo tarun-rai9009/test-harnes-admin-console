@@ -26,6 +26,42 @@ export type ChatSummaryCard = {
   table?: ChatSummaryTable;
 };
 
+export type CreateCarrierDraftFormField = {
+  key: string;
+  label: string;
+  required: boolean;
+  /** Use a taller input (e.g. comma-separated list) */
+  multiline?: boolean;
+};
+
+/** Shown when create-draft validation fails or user is correcting fields before save. */
+export type CreateCarrierDraftFormState = {
+  fields: CreateCarrierDraftFormField[];
+  values: Record<string, string>;
+  errors: Record<string, string>;
+  /** Non-field-specific message (e.g. Zinnia business error or network). */
+  formLevelError?: string;
+};
+
+/** Same shape as create-draft section fields; used for per-category update forms. */
+export type UpdateCarrierSectionFormState = CreateCarrierDraftFormState;
+
+export type UpdateCarrierFlowPayload =
+  | { step: "need_code"; codeError?: string }
+  | {
+      step: "pick_category";
+      carrierCode: string;
+      categories: { id: string; label: string }[];
+      categoryError?: string;
+    }
+  | {
+      step: "section_form";
+      carrierCode: string;
+      categoryId: string;
+      categoryLabel: string;
+      form: UpdateCarrierSectionFormState;
+    };
+
 export type ChatAssistantApiPayload = {
   message: string;
   responseType: ChatResponseType;
@@ -38,11 +74,25 @@ export type ChatAssistantApiPayload = {
   workflowId: string | null;
   /** Human-readable workflow title */
   workflowName: string | null;
+  /** New carrier draft: full form + field errors (client highlights invalid inputs). */
+  createCarrierDraftForm?: CreateCarrierDraftFormState | null;
+  /** Update carrier: structured UI (code → categories → section form). */
+  updateCarrierFlow?: UpdateCarrierFlowPayload | null;
 };
 
 export type ChatApiRequestBody = {
   sessionId: string;
   message: string;
+  /** When set with create_carrier_draft session, merges into collected params and re-validates. */
+  createCarrierDraftForm?: Record<string, unknown>;
+  /** Update flow: submit carrier code (need_code phase). */
+  updateCarrierCode?: string;
+  /** Update flow: choose section (pick_category phase). */
+  updateCarrierCategoryId?: string;
+  /** Update flow: submit section fields (section_form phase). */
+  updateCarrierSectionForm?: Record<string, string>;
+  /** Update flow: go back to carrier code or category list. */
+  updateCarrierNavigate?: "back_carrier_code" | "back_categories";
 };
 
 export type ChatApiSuccessBody = ChatAssistantApiPayload & {

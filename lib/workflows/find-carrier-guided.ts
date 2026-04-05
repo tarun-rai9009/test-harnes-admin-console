@@ -5,8 +5,7 @@ export function buildFindCarrierCollectingMessage(parts: {
   preamble?: string;
   followUp?: string;
 }): string {
-  const bridge =
-    "I can pull that up for you. I just need the carrier code — the short identifier your team uses for that carrier.";
+  const bridge = "I need the 4-character carrier code.";
   return [parts.preamble, bridge, parts.fieldPrompt, parts.followUp]
     .filter(Boolean)
     .join("\n\n");

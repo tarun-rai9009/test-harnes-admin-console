@@ -22,6 +22,23 @@ export type AssistantSessionState = {
   pendingFieldKey: string | null;
   /** Ordered optional field keys (e.g. update carrier flow) */
   optionalFieldQueue: string[];
+  /**
+   * Create-draft only: after full validation failed (form shown), next merge skips
+   * re-asking optional fields and goes straight to confirm-or-form again.
+   */
+  createCarrierSkipOptionalWalkthrough: boolean;
+  /** Create-draft: collect everything via the panel form instead of chat Q&A. */
+  createCarrierFormFirst: boolean;
+  /**
+   * Update-carrier form flow: code → category picker → section form.
+   * `none` when not in that UI or after reset.
+   */
+  updateCarrierUiPhase:
+    | "none"
+    | "need_code"
+    | "pick_category"
+    | "section_form"
+    | "section_confirm";
   updatedAt: number;
 };
 
@@ -32,12 +49,15 @@ export type SessionPatch = {
   currentWorkflowId?: string | null;
   phase?: WorkflowPhase;
   step?: number;
-  /** Shallow-merged into existing `collectedParams` */
+  /** When set, replaces `collectedParams` entirely (so removed keys are not kept). */
   collectedParams?: Record<string, unknown>;
   missingFieldKeys?: string[];
   awaitingConfirmation?: boolean;
   pendingFieldKey?: string | null;
   optionalFieldQueue?: string[];
+  createCarrierSkipOptionalWalkthrough?: boolean;
+  createCarrierFormFirst?: boolean;
+  updateCarrierUiPhase?: AssistantSessionState["updateCarrierUiPhase"];
 };
 
 const DEFAULT_MAX_SESSIONS = 10_000;
@@ -69,6 +89,9 @@ export function createInitialSessionState(sessionId: string): AssistantSessionSt
     awaitingConfirmation: false,
     pendingFieldKey: null,
     optionalFieldQueue: [],
+    createCarrierSkipOptionalWalkthrough: false,
+    createCarrierFormFirst: false,
+    updateCarrierUiPhase: "none",
     updatedAt: timestamp(),
   };
 }
@@ -109,12 +132,15 @@ function cloneState(state: AssistantSessionState): AssistantSessionState {
     collectedParams: { ...state.collectedParams },
     missingFieldKeys: [...state.missingFieldKeys],
     optionalFieldQueue: [...state.optionalFieldQueue],
+    createCarrierSkipOptionalWalkthrough: state.createCarrierSkipOptionalWalkthrough,
+    createCarrierFormFirst: state.createCarrierFormFirst ?? false,
+    updateCarrierUiPhase: state.updateCarrierUiPhase ?? "none",
   };
 }
 
 /**
  * Applies a patch with merge rules:
- * - `collectedParams` shallow-merges into previous
+ * - `collectedParams` replaces the previous map when provided (shallow copy)
  * - `appendToHistory` appends after optional `conversationHistory` replace
  */
 export function updateSession(
@@ -144,10 +170,7 @@ export function updateSession(
     next.step = patch.step;
   }
   if (patch.collectedParams !== undefined) {
-    next.collectedParams = {
-      ...next.collectedParams,
-      ...patch.collectedParams,
-    };
+    next.collectedParams = { ...patch.collectedParams };
   }
   if (patch.missingFieldKeys !== undefined) {
     next.missingFieldKeys = [...patch.missingFieldKeys];
@@ -160,6 +183,16 @@ export function updateSession(
   }
   if (patch.optionalFieldQueue !== undefined) {
     next.optionalFieldQueue = [...patch.optionalFieldQueue];
+  }
+  if (patch.createCarrierSkipOptionalWalkthrough !== undefined) {
+    next.createCarrierSkipOptionalWalkthrough =
+      patch.createCarrierSkipOptionalWalkthrough;
+  }
+  if (patch.createCarrierFormFirst !== undefined) {
+    next.createCarrierFormFirst = patch.createCarrierFormFirst;
+  }
+  if (patch.updateCarrierUiPhase !== undefined) {
+    next.updateCarrierUiPhase = patch.updateCarrierUiPhase;
   }
 
   next.updatedAt = timestamp();

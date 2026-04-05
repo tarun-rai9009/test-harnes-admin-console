@@ -1,5 +1,6 @@
 export type {
   CarrierDetails,
+  CarrierGetResponse,
   CarrierListApiResponse,
   CarrierSummary,
   CreateCarrierDraftPayload,

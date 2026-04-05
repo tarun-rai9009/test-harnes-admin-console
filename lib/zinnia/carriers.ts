@@ -7,6 +7,7 @@ import {
 import { requestZinniaJson } from "@/lib/zinnia/request";
 import type {
   CarrierDetails,
+  CarrierGetResponse,
   CarrierListApiResponse,
   CarrierSummary,
   CreateCarrierDraftPayload,
@@ -33,8 +34,8 @@ export async function createCarrierDraft(
 /** GET /carriers/{carrierCode} */
 export async function getCarrierByCode(
   carrierCode: string,
-): Promise<CarrierDetails> {
-  return requestZinniaJson<CarrierDetails>({
+): Promise<CarrierGetResponse> {
+  return requestZinniaJson<CarrierGetResponse>({
     method: "GET",
     path: zinniaCarrierPath(carrierCode),
   });
@@ -44,8 +45,8 @@ export async function getCarrierByCode(
 export async function updateCarrier(
   carrierCode: string,
   payload: UpdateCarrierPayload,
-): Promise<CarrierDetails> {
-  return requestZinniaJson<CarrierDetails>({
+): Promise<CarrierGetResponse> {
+  return requestZinniaJson<CarrierGetResponse>({
     method: "PUT",
     path: zinniaCarrierPath(carrierCode),
     body: payload,

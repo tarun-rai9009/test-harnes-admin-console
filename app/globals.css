@@ -1,21 +1,49 @@
 @import "tailwindcss";
 
+/*
+ * Admin Console Assistance — clean surfaces, slate neutrals, orange primary.
+ */
 :root {
-  --background: #f0f2f5;
-  --foreground: #161a1f;
+  --background: #eef2f6;
+  --foreground: #0f172a;
   --surface: #ffffff;
-  --border: #dfe3ea;
-  --accent: #1a365d;
-  --accent-muted: #4a6278;
-  --success-bg: #ecfdf5;
-  --success-border: #a7f3d0;
-  --card-shadow: 0 1px 2px rgb(22 26 31 / 0.04), 0 4px 16px rgb(22 26 31 / 0.06);
+  --surface-muted: #f8fafc;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  /* Primary — orange */
+  --accent: #ea580c;
+  --accent-hover: #c2410c;
+  --accent-foreground: #ffffff;
+  --accent-muted: #64748b;
+  --accent-subtle: rgba(234, 88, 12, 0.1);
+  --accent-ring: rgba(234, 88, 12, 0.3);
+  --user-bubble-bg: rgba(234, 88, 12, 0.08);
+  --user-bubble-border: rgba(234, 88, 12, 0.25);
+  --card-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 4px 20px rgb(15 23 42 / 0.06);
+  --card-shadow-sm: 0 1px 2px rgb(15 23 42 / 0.04), 0 2px 8px rgb(15 23 42 / 0.04);
+  --header-accent-bar: var(--accent);
+  /* Status — success uses warm orange (no green) */
+  --success-bg: #fff7ed;
+  --success-border: #fdba74;
+  --success-text: #9a3412;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #991b1b;
+  --danger-border-strong: #f87171;
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+  --warning-text: #78350f;
+  --warning-icon: #d97706;
+  /* Confirm / info callouts — slightly deeper orange than success summary */
+  --info-bg: #ffedd5;
+  --info-border: #fb923c;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
   --color-border: var(--border);
   --color-accent: var(--accent);
   --color-accent-muted: var(--accent-muted);
@@ -24,11 +52,105 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background-image: radial-gradient(
-    ellipse 120% 80% at 50% -20%,
-    rgb(255 255 255 / 0.9),
-    transparent
+    ellipse 100% 60% at 50% -15%,
+    rgb(255 255 255 / 0.75),
+    transparent 55%
   );
   background-attachment: fixed;
+}
+
+/* Shared UI patterns — use across chat, forms, cards */
+@layer components {
+  .ui-panel {
+    @apply rounded-xl border border-border bg-surface-muted px-5 py-4 shadow-[var(--card-shadow-sm)] border-l-[3px] border-l-accent;
+  }
+
+  .ui-panel-title {
+    @apply text-sm font-semibold tracking-tight text-foreground;
+  }
+
+  .ui-panel-desc {
+    @apply mt-1 text-sm leading-relaxed text-accent-muted;
+  }
+
+  .ui-btn-primary {
+    @apply rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50;
+    background-color: var(--accent);
+    color: var(--accent-foreground);
+  }
+
+  .ui-btn-primary:hover:not(:disabled) {
+    background-color: var(--accent-hover);
+  }
+
+  .ui-btn-secondary {
+    @apply rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-btn-ghost {
+    @apply text-sm font-semibold text-accent underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-input {
+    @apply mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-sm outline-none transition placeholder:text-accent-muted/65 focus:border-accent/45 focus:ring-2 focus:ring-accent/15 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-composer-input {
+    @apply max-h-36 min-h-[48px] w-full flex-1 resize-none rounded-lg border border-border bg-surface px-4 py-3 text-[15px] leading-relaxed text-foreground shadow-sm outline-none transition placeholder:text-accent-muted/60 focus:border-accent/45 focus:ring-2 focus:ring-accent/15 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-input-invalid {
+    @apply border-[color:var(--danger-border-strong)] focus:border-[color:var(--danger-border-strong)] focus:ring-red-200/40;
+  }
+
+  .ui-textarea {
+    @apply min-h-[4.5rem] resize-y;
+  }
+
+  .ui-alert-danger {
+    @apply mt-3 rounded-lg border px-3 py-2 text-sm font-medium;
+    border-color: var(--danger-border);
+    background-color: var(--danger-bg);
+    color: var(--danger-text);
+  }
+
+  .ui-alert-warning {
+    @apply rounded-xl border px-5 py-4 shadow-[var(--card-shadow-sm)];
+    border-color: var(--warning-border);
+    background-color: var(--warning-bg);
+    color: var(--warning-text);
+  }
+
+  .ui-card {
+    @apply rounded-xl border border-border bg-surface px-5 py-4 shadow-[var(--card-shadow-sm)];
+  }
+
+  /* Main shell / elevated surface — no padding (children define inset). */
+  .ui-card-elevated {
+    @apply rounded-xl border border-border/90 bg-surface shadow-[var(--card-shadow)];
+  }
+
+  .ui-link-inline {
+    @apply text-sm font-semibold text-accent underline-offset-2 hover:underline;
+  }
+
+  .ui-badge-required {
+    @apply inline-flex rounded-md border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide;
+    border-color: var(--danger-border);
+    background-color: var(--danger-bg);
+    color: var(--danger-text);
+  }
+
+  .ui-badge-optional {
+    @apply inline-flex rounded-md border border-border bg-surface-muted px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent-muted;
+  }
+
+  .ui-kbd {
+    @apply rounded-md border border-border bg-surface px-1.5 py-0.5 font-sans text-[11px] text-foreground/85 shadow-sm;
+  }
 }

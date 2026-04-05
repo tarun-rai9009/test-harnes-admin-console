@@ -202,19 +202,19 @@ function messageForCreateValidation(e: ZinniaApiError): string {
     : [];
 
   if (phrases.length === 1) {
-    return `I could not create the carrier because ${phrases[0]!} appears to be invalid or was not accepted. Please correct it and try again.`;
+    return `Fix ${phrases[0]!} and try again.`;
   }
   if (phrases.length > 1) {
     const list = phrases.slice(0, 5).join(", ");
-    const extra = phrases.length > 5 ? ", and a few other fields" : "";
-    return `I could not create the carrier because some information was not accepted (${list}${extra}). Please review those items and try again.`;
+    const extra = phrases.length > 5 ? ", …" : "";
+    return `Fix: ${list}${extra}. Then try again.`;
   }
 
   if (e.status === 400 || e.status === 422) {
-    return "I could not create the carrier because some information was missing or not accepted. Please review the details and try again.";
+    return "Create failed — check the details and try again.";
   }
 
-  return "Something went wrong while creating the carrier. Please try again in a moment.";
+  return "Couldn’t create the carrier. Try again.";
 }
 
 function messageForUpdateValidation(e: ZinniaApiError): string {
@@ -224,18 +224,18 @@ function messageForUpdateValidation(e: ZinniaApiError): string {
     : [];
 
   if (phrases.length === 1) {
-    return `I could not save those changes because ${phrases[0]!} appears to be invalid or was not accepted. Please correct it and try again.`;
+    return `Fix ${phrases[0]!} and try again.`;
   }
   if (phrases.length > 1) {
     const list = phrases.slice(0, 5).join(", ");
-    return `I could not save those changes because some fields were not accepted (${list}). Please review and try again.`;
+    return `Fix: ${list}. Then try again.`;
   }
 
   if (e.status === 400 || e.status === 422) {
-    return "I could not save those changes because some information was missing or not accepted. Please review and try again.";
+    return "Update failed — check the form and try again.";
   }
 
-  return "Something went wrong while saving your changes. Please try again in a moment.";
+  return "Couldn’t save changes. Try again.";
 }
 
 function messageForFindNotFound(e: ZinniaApiError, collected?: Record<string, unknown>): string {
@@ -245,12 +245,12 @@ function messageForFindNotFound(e: ZinniaApiError, collected?: Record<string, un
       ? collected.carrierCode.trim().toUpperCase()
       : undefined;
   if (fromPath) {
-    return `I could not find a carrier with code ${fromPath.toUpperCase()}. Please check the code and try again.`;
+    return `No carrier for code ${fromPath.toUpperCase()}. Check the code.`;
   }
   if (fromData) {
-    return `I could not find a carrier with code ${fromData}. Please check the code and try again.`;
+    return `No carrier for code ${fromData}. Check the code.`;
   }
-  return "I could not find a carrier with that code. Please check the code and try again.";
+  return "No carrier found for that code.";
 }
 
 function messageForZinniaApi(
@@ -261,7 +261,7 @@ function messageForZinniaApi(
   const { status, path, method } = e;
 
   if (status === 0) {
-    return "Could not reach the carrier system (network or timeout). Check connectivity and configuration, then try again.";
+    return "Can’t reach the carrier system. Check connection and try again.";
   }
 
   if (status === 404 && method === "GET" && isSingleCarrierPath(path)) {
@@ -276,9 +276,9 @@ function messageForZinniaApi(
         : undefined;
     if (p || d) {
       const code = (p ?? d)!.toUpperCase();
-      return `I could not find a carrier with code ${code} to update. Please verify the code.`;
+      return `No carrier ${code} to update. Verify the code.`;
     }
-    return "I could not find that carrier to update. Please verify the code.";
+    return "No carrier to update. Verify the code.";
   }
 
   if (
@@ -298,19 +298,19 @@ function messageForZinniaApi(
   }
 
   if (status === 401 || status === 403) {
-    return "You do not have permission to complete this action in the carrier system, or the session could not be verified. If this keeps happening, please contact your administrator.";
+    return "Not allowed or session invalid. Contact your admin if this persists.";
   }
 
   if (status === 429) {
-    return "The carrier system is busy right now. Please wait a moment and try again.";
+    return "Carrier system busy. Wait a moment and retry.";
   }
 
   if (path === "/carriers" && method === "GET") {
-    return "Something went wrong while retrieving carriers. Please try again.";
+    return "Couldn’t load carriers. Try again.";
   }
 
   if (path === "/datapoints" || path.startsWith("/datapoints")) {
-    return "Something went wrong while loading the reference list. Please try again.";
+    return "Couldn’t load reference list. Try again.";
   }
 
   if (path.includes("/carriers/draft") && method === "POST") {
@@ -323,20 +323,20 @@ function messageForZinniaApi(
 
   if (method === "GET" && isSingleCarrierPath(path)) {
     if (status >= 500) {
-      return "Something went wrong while looking up that carrier. Please try again.";
+      return "Lookup failed. Try again.";
     }
     return messageForFindNotFound(e, collected);
   }
 
   if (status >= 500) {
-    return "Something went wrong on the carrier system. Please try again in a moment.";
+    return "Carrier system error. Try again.";
   }
 
-  return "Something went wrong while talking to the carrier system. Please try again in a moment.";
+  return "Carrier system error. Try again.";
 }
 
 function messageForAuth(): string {
-  return "We could not sign in to the carrier system. Please check that the connection is configured correctly, then try again.";
+  return "Couldn’t sign in to the carrier system. Check configuration.";
 }
 
 /**
@@ -363,13 +363,13 @@ export function formatChatWorkflowError(
   if (error instanceof Error) {
     const m = error.message;
     if (/no update fields were provided/i.test(m)) {
-      return "I could not send an update because no changes were included. Please add at least one value to update, then try again.";
+      return "Add at least one field to update, then try again.";
     }
     if (/zinnia is not configured/i.test(m) || /not configured/i.test(m)) {
-      return "The carrier system is not connected in this environment, so I can’t complete that yet.";
+      return "Carrier system isn’t connected here.";
     }
-    return "Something unexpected happened. Please try again in a moment.";
+    return "Something went wrong. Try again.";
   }
 
-  return "Something unexpected happened. Please try again in a moment.";
+  return "Something went wrong. Try again.";
 }

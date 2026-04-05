@@ -1,5 +1,6 @@
 import "server-only";
 
+import { CHAT_AGENT_TITLE } from "@/lib/branding";
 import { analyzeUserUtterance } from "@/lib/ai/analyze";
 import { mapAiIntentToWorkflowId } from "@/lib/ai/intent-map";
 import type { ExtractedFields, IntentAnalysisResult } from "@/lib/ai/types";
@@ -17,24 +18,56 @@ import {
   getMissingFields,
   mergeExtractedFields,
 } from "@/lib/workflows/helpers";
+import { buildCreateDraftPayload } from "@/lib/workflows/create-carrier-draft-form-utils";
+import {
+  buildCreateCarrierDraftFormState,
+  mergeCreateCarrierDraftFormIntoCollected,
+} from "@/lib/workflows/definitions/create-carrier-draft";
+import { validateCreateCarrierDraftMerged } from "@/lib/workflows/create-carrier-draft-validate";
 import { getWorkflowDefinition } from "@/lib/workflows/definitions/registry";
+import { createCarrierDraft } from "@/lib/zinnia/carriers";
+import { parseZinniaCreateDraftErrorBody } from "@/lib/zinnia/parse-create-draft-errors";
+import { parseZinniaUpdateCarrierErrorBody } from "@/lib/zinnia/parse-update-carrier-errors";
+import { ZinniaApiError } from "@/lib/zinnia/types";
 import {
   getOptionalFieldKeysInOrder,
   getRequiredFieldDefinitions,
 } from "@/lib/workflows/engine";
+import { updateCarrierHasChanges } from "@/lib/workflows/definitions/update-carrier";
+import {
+  UPDATE_CATEGORY_LABELS,
+  type UpdateCategoryId,
+} from "@/lib/workflows/definitions/update-carrier-constants";
 import {
   getUpdateCarrierNoChangesMessage,
   getUpdateCarrierOptionalIntro,
-  updateCarrierHasChanges,
-} from "@/lib/workflows/definitions/update-carrier";
+  validateUpdateCategory,
+} from "@/lib/workflows/definitions/update-carrier-catalog";
+import {
+  buildUpdateCarrierSectionFormFields,
+  buildUpdateSectionFormStateFromStrings,
+  isUpdateCategoryId,
+  listUpdateCarrierCategories,
+  stringValuesForUpdateSection,
+  validateAndMergeUpdateCarrierSection,
+} from "@/lib/workflows/update-carrier-section-form";
+import { validateCarrierCode } from "@/lib/workflows/validators";
 import type { WorkflowDefinition } from "@/lib/workflows/workflow-types";
+import {
+  buildUpdateSuccessSummaryCardFields,
+  stripUpdateCategoryKeysFromCollected,
+} from "@/lib/workflows/definitions/update-carrier-payload";
+import { validateCollectedParamsBeforeExecute } from "@/lib/workflows/validate-collected";
 import { formatChatWorkflowError } from "@/lib/chat/workflow-errors";
 import type {
   ChatApiSuccessBody,
   ChatAssistantApiPayload,
   ChatSummaryCard,
+  UpdateCarrierFlowPayload,
+  UpdateCarrierSectionFormState,
 } from "@/types/chat-assistant";
 import type { ChatMessage } from "@/types/chat";
+import type { CarrierDetails } from "@/types/zinnia/carriers";
 
 function assistantMessage(content: string): ChatMessage {
   return {
@@ -61,6 +94,9 @@ const WORKFLOW_RESET = {
   awaitingConfirmation: false,
   pendingFieldKey: null as string | null,
   optionalFieldQueue: [] as string[],
+  createCarrierSkipOptionalWalkthrough: false,
+  createCarrierFormFirst: false,
+  updateCarrierUiPhase: "none" as const,
 };
 
 function extractedToRecord(fields: ExtractedFields): Record<string, unknown> {
@@ -103,14 +139,94 @@ function heuristicWorkflowId(text: string): string | null {
   return null;
 }
 
+type ComposeBodyPartial = Partial<ChatAssistantApiPayload> &
+  Pick<ChatAssistantApiPayload, "message" | "responseType"> & {
+    /** After WORKFLOW_RESET, keep UI chip / captions (e.g. create success + full result). */
+    displayWorkflowId?: string | null;
+    displayWorkflowName?: string | null;
+    /**
+     * When set, overrides auto `updateCarrierFlow` from session (use `null` to omit panel).
+     */
+    updateCarrierFlow?: UpdateCarrierFlowPayload | null;
+  };
+
+function buildUpdateSectionFormState(
+  collected: Record<string, unknown>,
+  categoryId: UpdateCategoryId,
+  errors: Record<string, string> = {},
+  formLevelError?: string,
+): UpdateCarrierSectionFormState {
+  return {
+    fields: buildUpdateCarrierSectionFormFields(categoryId),
+    values: stringValuesForUpdateSection(collected, categoryId),
+    errors,
+    formLevelError,
+  };
+}
+
+function buildUpdateCarrierFlowPayloadFromSession(
+  session: AssistantSessionState,
+): UpdateCarrierFlowPayload | null {
+  if (session.currentWorkflowId !== "update_carrier") return null;
+  const phase = session.updateCarrierUiPhase ?? "none";
+  if (phase === "none") return null;
+
+  const data = session.collectedParams;
+  const code =
+    typeof data.carrierCode === "string" ? data.carrierCode.toUpperCase() : "";
+
+  if (phase === "need_code") {
+    return { step: "need_code" };
+  }
+
+  if (phase === "pick_category") {
+    return {
+      step: "pick_category",
+      carrierCode: code,
+      categories: listUpdateCarrierCategories(),
+    };
+  }
+
+  if (phase === "section_confirm") {
+    return null;
+  }
+
+  const cat = data.updateCategory;
+  if (typeof cat !== "string" || !isUpdateCategoryId(cat)) {
+    return {
+      step: "pick_category",
+      carrierCode: code,
+      categories: listUpdateCarrierCategories(),
+    };
+  }
+
+  return {
+    step: "section_form",
+    carrierCode: code,
+    categoryId: cat,
+    categoryLabel: UPDATE_CATEGORY_LABELS[cat],
+    form: buildUpdateSectionFormState(data, cat),
+  };
+}
+
 function composeBody(
   session: AssistantSessionState,
-  partial: Partial<ChatAssistantApiPayload> &
-    Pick<ChatAssistantApiPayload, "message" | "responseType">,
+  partial: ComposeBodyPartial,
 ): ChatApiSuccessBody {
-  const def = session.currentWorkflowId
-    ? getWorkflowDefinition(session.currentWorkflowId)
-    : undefined;
+  const workflowId =
+    partial.displayWorkflowId !== undefined
+      ? partial.displayWorkflowId
+      : session.currentWorkflowId;
+  const def = workflowId ? getWorkflowDefinition(workflowId) : undefined;
+  const workflowName =
+    partial.displayWorkflowName !== undefined
+      ? partial.displayWorkflowName
+      : (def?.userFacingLabel ?? null);
+  const updateCarrierFlow =
+    partial.updateCarrierFlow !== undefined
+      ? partial.updateCarrierFlow
+      : buildUpdateCarrierFlowPayloadFromSession(session);
+
   return {
     message: partial.message,
     responseType: partial.responseType,
@@ -124,8 +240,13 @@ function composeBody(
       partial.awaitingConfirmation !== undefined
         ? partial.awaitingConfirmation
         : session.awaitingConfirmation,
-    workflowId: session.currentWorkflowId,
-    workflowName: def?.userFacingLabel ?? null,
+    workflowId,
+    workflowName,
+    createCarrierDraftForm:
+      partial.createCarrierDraftForm !== undefined
+        ? partial.createCarrierDraftForm
+        : undefined,
+    updateCarrierFlow,
     sessionId: session.sessionId,
     conversationHistory: session.conversationHistory,
   };
@@ -137,15 +258,15 @@ function buildSuccessSummaryCard(
 ): ChatSummaryCard | undefined {
   const title =
     def.id === "create_carrier_draft"
-      ? "New carrier summary"
+      ? "Draft"
       : def.id === "find_carrier"
-        ? "Carrier on file"
+        ? "Carrier"
         : def.id === "list_carriers"
-          ? "Your carrier list"
+          ? "Carriers"
           : def.id === "get_datapoints"
-            ? "Reference values"
+            ? "Reference"
             : def.id === "update_carrier"
-              ? "Updated details"
+              ? "Updated"
               : "Summary";
 
   if (formatted.summaryFields?.length) {
@@ -172,7 +293,7 @@ function resolveConfirmationUi(
     return {
       cardText,
       summaryCard: {
-        title: "Review before saving",
+        title: "Review",
         fields: rows,
       },
     };
@@ -188,15 +309,13 @@ function resolveConfirmationUi(
 
 function helpMessage(): string {
   return [
-    "I’m here to help with day-to-day carrier work. You can ask for things like:",
+    "Try:",
+    "• New carrier",
+    "• Lookup by code",
+    "• List carriers",
+    "• Update carrier",
     "",
-    "• Set up a new carrier",
-    "• Look someone up by carrier code",
-    "• See the full carrier list",
-    "• Pull reference values for forms",
-    "• Update an existing carrier",
-    "",
-    "What would you like to do next?",
+    "What do you need?",
   ].join("\n");
 }
 
@@ -256,7 +375,7 @@ async function runExecuteWithData(
       responseType: "success",
       message: formatted.message,
       summaryCard: buildSuccessSummaryCard(def, formatted),
-      resultData: undefined,
+      resultData: def.id === "find_carrier" ? result : undefined,
       missingFields: [],
       awaitingConfirmation: false,
     });
@@ -273,6 +392,970 @@ async function runExecuteWithData(
   }
 }
 
+const CREATE_DRAFT_FORM_FAIL_COPY =
+  "Fix the highlighted fields, then submit again.";
+
+function rejectedToErrorMap(
+  rejected: { key: string; error: string }[],
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const r of rejected) errors[r.key] = r.error;
+  return errors;
+}
+
+/** New carrier: show the full form immediately (required + optional), not chat Q&A. */
+function startCreateCarrierWithForm(
+  sessionId: string,
+  def: WorkflowDefinition,
+  merged: Record<string, unknown>,
+  analysis: IntentAnalysisResult,
+  rejected: { key: string; error: string }[],
+): ChatApiSuccessBody {
+  const preamble = analysis.naturalPreamble;
+  const followUp = analysis.suggestedFollowUp;
+  const errors = rejectedToErrorMap(rejected);
+  const message = [
+    preamble,
+    "Use the form below. Required fields must be filled. Submit to create the draft.",
+    followUp,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const cur = getSession(sessionId);
+  const session = updateSession(sessionId, {
+    currentWorkflowId: def.id,
+    phase: "collecting",
+    collectedParams: merged,
+    missingFieldKeys: [],
+    pendingFieldKey: null,
+    optionalFieldQueue: [],
+    createCarrierSkipOptionalWalkthrough: true,
+    createCarrierFormFirst: true,
+    step: cur.step + 1,
+    appendToHistory: [assistantMessage(message)],
+  });
+  return composeBody(session, {
+    responseType: "needs_input",
+    message,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: buildCreateCarrierDraftFormState(merged, errors),
+  });
+}
+
+function transitionCreateCarrierToConfirmOrForm(
+  sessionId: string,
+  def: WorkflowDefinition,
+  merged: Record<string, unknown>,
+  preamble?: string,
+  followUp?: string,
+): ChatApiSuccessBody {
+  const vr = validateCollectedParamsBeforeExecute(def, merged);
+  if (!vr.ok) {
+    const message = [preamble, CREATE_DRAFT_FORM_FAIL_COPY, followUp]
+      .filter(Boolean)
+      .join("\n\n");
+    const session = updateSession(sessionId, {
+      phase: "collecting",
+      collectedParams: merged,
+      awaitingConfirmation: false,
+      pendingFieldKey: null,
+      optionalFieldQueue: [],
+      missingFieldKeys: [],
+      createCarrierSkipOptionalWalkthrough: true,
+      createCarrierFormFirst: true,
+      appendToHistory: [assistantMessage(message)],
+    });
+    return composeBody(session, {
+      responseType: "needs_input",
+      message,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: buildCreateCarrierDraftFormState(merged, vr.errors),
+    });
+  }
+
+  const { cardText, summaryCard } = resolveConfirmationUi(def, merged);
+  const cur2 = getSession(sessionId);
+  const session = updateSession(sessionId, {
+    currentWorkflowId: def.id,
+    phase: "confirming",
+    collectedParams: merged,
+    missingFieldKeys: [],
+    pendingFieldKey: null,
+    awaitingConfirmation: true,
+    optionalFieldQueue: [],
+    createCarrierSkipOptionalWalkthrough: false,
+    createCarrierFormFirst: false,
+    step: cur2.step + 1,
+    appendToHistory: [assistantMessage(cardText)],
+  });
+  return composeBody(session, {
+    responseType: "confirm",
+    message: cardText,
+    summaryCard,
+    missingFields: [],
+    awaitingConfirmation: true,
+    createCarrierDraftForm: null,
+  });
+}
+
+function continueCreateCarrierDraftAfterRequired(
+  sessionId: string,
+  def: WorkflowDefinition,
+  merged: Record<string, unknown>,
+  preamble?: string,
+  followUp?: string,
+): ChatApiSuccessBody {
+  const queue = getOptionalFieldKeysInOrder(def, merged);
+  if (queue.length === 0) {
+    return transitionCreateCarrierToConfirmOrForm(
+      sessionId,
+      def,
+      merged,
+      preamble,
+      followUp,
+    );
+  }
+  const pk = queue[0]!;
+  const field = findFieldDef(def, pk, merged)!;
+  const message = [
+    preamble,
+    "Optional details — say **skip** to skip any.",
+    field.businessPrompt,
+    followUp,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const cur = getSession(sessionId);
+  const session = updateSession(sessionId, {
+    currentWorkflowId: def.id,
+    phase: "collecting",
+    collectedParams: merged,
+    missingFieldKeys: [],
+    pendingFieldKey: pk,
+    awaitingConfirmation: false,
+    optionalFieldQueue: queue,
+    createCarrierSkipOptionalWalkthrough: false,
+    createCarrierFormFirst: false,
+    step: cur.step + 1,
+    appendToHistory: [assistantMessage(message)],
+  });
+  return composeBody(session, {
+    responseType: "needs_input",
+    message,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+  });
+}
+
+function handleCreateCarrierCollecting(
+  sessionId: string,
+  def: WorkflowDefinition,
+  session: AssistantSessionState,
+  merged: Record<string, unknown>,
+  rejected: { key: string; error: string }[],
+  analysis: IntentAnalysisResult,
+): ChatApiSuccessBody {
+  let queue = [...session.optionalFieldQueue];
+  const pending = session.pendingFieldKey;
+  const headRejected =
+    pending !== null && rejected.some((r) => r.key === pending);
+
+  if (pending && queue[0] === pending && !headRejected) {
+    queue = queue.slice(1);
+  }
+
+  const missingReq = getMissingFields(def, merged);
+  if (missingReq.length > 0) {
+    const pk = missingReq[0]!;
+    const field = findFieldDef(def, pk, merged)!;
+    const err = rejected.find((r) => r.key === pk);
+    const message = [
+      analysis.naturalPreamble,
+      err?.error,
+      field.businessPrompt,
+      analysis.suggestedFollowUp,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const s2 = updateSession(sessionId, {
+      collectedParams: merged,
+      missingFieldKeys: missingReq,
+      pendingFieldKey: pk,
+      optionalFieldQueue: [],
+      createCarrierSkipOptionalWalkthrough: false,
+      createCarrierFormFirst: false,
+      appendToHistory: [assistantMessage(message)],
+    });
+    return composeBody(s2, {
+      responseType: err ? "error" : "needs_input",
+      message,
+      missingFields: missingReq,
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+
+  if (queue.length > 0) {
+    const pk = queue[0]!;
+    const field = findFieldDef(def, pk, merged)!;
+    const err = headRejected
+      ? rejected.find((r) => r.key === pending)
+      : undefined;
+    const message = [
+      analysis.naturalPreamble,
+      err?.error,
+      field.businessPrompt,
+      analysis.suggestedFollowUp,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const s2 = updateSession(sessionId, {
+      collectedParams: merged,
+      missingFieldKeys: [],
+      pendingFieldKey: pk,
+      optionalFieldQueue: queue,
+      createCarrierFormFirst: false,
+      appendToHistory: [assistantMessage(message)],
+    });
+    return composeBody(s2, {
+      responseType: err ? "error" : "needs_input",
+      message,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+
+  return transitionCreateCarrierToConfirmOrForm(
+    sessionId,
+    def,
+    merged,
+    analysis.naturalPreamble,
+    analysis.suggestedFollowUp,
+  );
+}
+
+async function handleCreateCarrierDraftFormSubmit(
+  sessionId: string,
+  session: AssistantSessionState,
+  form: Record<string, unknown>,
+): Promise<ChatApiSuccessBody> {
+  const def = getWorkflowDefinition("create_carrier_draft")!;
+  const merged = mergeCreateCarrierDraftFormIntoCollected(
+    session.collectedParams,
+    form,
+  );
+  const vr = validateCreateCarrierDraftMerged(merged);
+  if (!vr.ok) {
+    const s2 = updateSession(sessionId, {
+      collectedParams: merged,
+      phase: "collecting",
+      awaitingConfirmation: false,
+      pendingFieldKey: null,
+      optionalFieldQueue: [],
+      missingFieldKeys: [],
+      createCarrierSkipOptionalWalkthrough: true,
+      createCarrierFormFirst: true,
+      appendToHistory: [assistantMessage(CREATE_DRAFT_FORM_FAIL_COPY)],
+    });
+    return composeBody(s2, {
+      responseType: "needs_input",
+      message: CREATE_DRAFT_FORM_FAIL_COPY,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: buildCreateCarrierDraftFormState(
+        merged,
+        vr.errors,
+      ),
+    });
+  }
+
+  try {
+    const payload = buildCreateDraftPayload(merged);
+    const result = await createCarrierDraft(payload);
+    const formatted = formatSuccessResponse(def, result);
+    const s2 = updateSession(sessionId, {
+      ...WORKFLOW_RESET,
+      appendToHistory: [assistantMessage(formatted.message)],
+    });
+    return composeBody(s2, {
+      responseType: "success",
+      message: formatted.message,
+      summaryCard: buildSuccessSummaryCard(def, formatted),
+      resultData: result,
+      displayWorkflowId: def.id,
+      displayWorkflowName: def.userFacingLabel,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  } catch (e) {
+    if (e instanceof ZinniaApiError) {
+      const { fieldErrors, formLevelMessage } =
+        parseZinniaCreateDraftErrorBody(e.bodyText);
+      const headline =
+        formLevelMessage ??
+        (Object.keys(fieldErrors).length > 0
+          ? "Check the form for field errors."
+          : e.message);
+      const s2 = updateSession(sessionId, {
+        collectedParams: merged,
+        phase: "collecting",
+        awaitingConfirmation: false,
+        pendingFieldKey: null,
+        optionalFieldQueue: [],
+        missingFieldKeys: [],
+        createCarrierSkipOptionalWalkthrough: true,
+        createCarrierFormFirst: true,
+        appendToHistory: [assistantMessage(headline)],
+      });
+      return composeBody(s2, {
+        responseType: "error",
+        message: headline,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: buildCreateCarrierDraftFormState(
+          merged,
+          fieldErrors,
+          Object.keys(fieldErrors).length === 0
+            ? (formLevelMessage ?? headline)
+            : formLevelMessage,
+        ),
+      });
+    }
+
+    const msg = formatChatWorkflowError(e, def, merged);
+    const s2 = updateSession(sessionId, {
+      collectedParams: merged,
+      phase: "collecting",
+      awaitingConfirmation: false,
+      pendingFieldKey: null,
+      optionalFieldQueue: [],
+      missingFieldKeys: [],
+      createCarrierSkipOptionalWalkthrough: true,
+      createCarrierFormFirst: true,
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: buildCreateCarrierDraftFormState(
+        merged,
+        {},
+        msg,
+      ),
+    });
+  }
+}
+
+function startUpdateCarrierFormFlow(
+  sessionId: string,
+  def: WorkflowDefinition,
+  merged: Record<string, unknown>,
+  analysis: IntentAnalysisResult,
+  rejected: { key: string; error: string }[],
+): ChatApiSuccessBody {
+  const preamble = analysis.naturalPreamble;
+  const followUp = analysis.suggestedFollowUp;
+  const cur = getSession(sessionId);
+  const hadCarrierAttempt =
+    merged.carrierCode !== undefined &&
+    merged.carrierCode !== null &&
+    String(merged.carrierCode).trim() !== "";
+  const codeVal = validateCarrierCode(merged.carrierCode);
+
+  if (codeVal.ok) {
+    const msg = [
+      preamble,
+      `Carrier **${codeVal.normalized}**. Pick a section below.`,
+      followUp,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const session = updateSession(sessionId, {
+      currentWorkflowId: def.id,
+      phase: "collecting",
+      collectedParams: { carrierCode: codeVal.normalized },
+      updateCarrierUiPhase: "pick_category",
+      missingFieldKeys: [],
+      pendingFieldKey: null,
+      optionalFieldQueue: [],
+      awaitingConfirmation: false,
+      step: cur.step + 1,
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(session, {
+      responseType: "needs_input",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+
+  const codeErr =
+    hadCarrierAttempt && !codeVal.ok
+      ? codeVal.error
+      : rejected.find((r) => r.key === "carrierCode")?.error;
+
+  const introMsg = [
+    preamble,
+    "Enter the 4-character **carrier code** in the form or chat.",
+    followUp,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const session = updateSession(sessionId, {
+    currentWorkflowId: def.id,
+    phase: "collecting",
+    collectedParams: {},
+    updateCarrierUiPhase: "need_code",
+    missingFieldKeys: [],
+    pendingFieldKey: null,
+    optionalFieldQueue: [],
+    awaitingConfirmation: false,
+    step: cur.step + 1,
+    appendToHistory: [assistantMessage(introMsg)],
+  });
+
+  return composeBody(session, {
+    responseType: codeErr ? "error" : "needs_input",
+    message: introMsg,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+    updateCarrierFlow: codeErr
+      ? { step: "need_code", codeError: codeErr }
+      : { step: "need_code" },
+  });
+}
+
+function handleUpdateCarrierCodeSubmit(
+  sessionId: string,
+  rawCode: string,
+): ChatApiSuccessBody {
+  const codeVal = validateCarrierCode(rawCode);
+  if (!codeVal.ok) {
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(codeVal.error)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: codeVal.error,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: { step: "need_code", codeError: codeVal.error },
+    });
+  }
+  const msg = `Carrier **${codeVal.normalized}**. Pick a section to update.`;
+  const session = updateSession(sessionId, {
+    collectedParams: { carrierCode: codeVal.normalized },
+    updateCarrierUiPhase: "pick_category",
+    appendToHistory: [assistantMessage(msg)],
+  });
+  return composeBody(session, {
+    responseType: "needs_input",
+    message: msg,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+  });
+}
+
+function handleUpdateCarrierCategorySubmit(
+  sessionId: string,
+  session: AssistantSessionState,
+  categoryRaw: string,
+): ChatApiSuccessBody {
+  const codeVal = validateCarrierCode(session.collectedParams.carrierCode);
+  if (!codeVal.ok) {
+    const msg = "Enter the carrier code again.";
+    const s2 = updateSession(sessionId, {
+      collectedParams: {},
+      updateCarrierUiPhase: "need_code",
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: { step: "need_code" },
+    });
+  }
+
+  const catVal = validateUpdateCategory(categoryRaw);
+  if (!catVal.ok) {
+    const msg = [catVal.error, "Pick a section from the list."]
+      .filter(Boolean)
+      .join("\n\n");
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: {
+        step: "pick_category",
+        carrierCode: String(codeVal.normalized),
+        categories: listUpdateCarrierCategories(),
+        categoryError: catVal.error,
+      },
+    });
+  }
+
+  const cat = catVal.normalized as UpdateCategoryId;
+  const merged = {
+    ...session.collectedParams,
+    carrierCode: codeVal.normalized,
+    updateCategory: cat,
+  };
+  const msg = `**${UPDATE_CATEGORY_LABELS[cat]}** — fill changes, then save.`;
+  const session2 = updateSession(sessionId, {
+    collectedParams: merged,
+    updateCarrierUiPhase: "section_form",
+    appendToHistory: [assistantMessage(msg)],
+  });
+  return composeBody(session2, {
+    responseType: "needs_input",
+    message: msg,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+  });
+}
+
+async function executeUpdateCarrierAfterSectionConfirm(
+  sessionId: string,
+  session: AssistantSessionState,
+): Promise<ChatApiSuccessBody> {
+  const def = getWorkflowDefinition("update_carrier")!;
+  const data = session.collectedParams;
+  const catRaw = data.updateCategory;
+  if (typeof catRaw !== "string" || !isUpdateCategoryId(catRaw)) {
+    const msg = "Choose a section again.";
+    const s2 = updateSession(sessionId, {
+      updateCarrierUiPhase: "pick_category",
+      awaitingConfirmation: false,
+      phase: "collecting",
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+  const cat = catRaw as UpdateCategoryId;
+  try {
+    const result = await executeDefinition(def, data);
+    const formatted = formatSuccessResponse(def, result);
+    const stripped = stripUpdateCategoryKeysFromCollected(data, cat);
+    const msg = [formatted.message, "", "Update another section below, or start a new chat when done."].join(
+      "\n",
+    );
+    const s2 = updateSession(sessionId, {
+      currentWorkflowId: "update_carrier",
+      phase: "collecting",
+      collectedParams: stripped,
+      updateCarrierUiPhase: "pick_category",
+      awaitingConfirmation: false,
+      missingFieldKeys: [],
+      pendingFieldKey: null,
+      optionalFieldQueue: [],
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "needs_input",
+      message: msg,
+      summaryCard: {
+        title: "Updated",
+        fields: buildUpdateSuccessSummaryCardFields(
+          result as CarrierDetails,
+          data,
+        ),
+      },
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  } catch (e) {
+    let fieldErrors: Record<string, string> = {};
+    let formLevel: string | undefined;
+    if (e instanceof ZinniaApiError) {
+      const p = parseZinniaUpdateCarrierErrorBody(e.bodyText);
+      fieldErrors = p.fieldErrors;
+      formLevel =
+        p.formLevelMessage ?? formatChatWorkflowError(e, def, data);
+    } else {
+      formLevel = formatChatWorkflowError(e, def, data);
+    }
+    const failMsg = formLevel ?? "Update failed.";
+    const s2 = updateSession(sessionId, {
+      collectedParams: data,
+      updateCarrierUiPhase: "section_form",
+      awaitingConfirmation: false,
+      phase: "collecting",
+      appendToHistory: [assistantMessage(failMsg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: failMsg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: {
+        step: "section_form",
+        carrierCode: String(data.carrierCode ?? "").toUpperCase(),
+        categoryId: cat,
+        categoryLabel: UPDATE_CATEGORY_LABELS[cat],
+        form: buildUpdateSectionFormState(
+          data,
+          cat,
+          fieldErrors,
+          Object.keys(fieldErrors).length === 0 ? formLevel : undefined,
+        ),
+      },
+    });
+  }
+}
+
+async function handleUpdateCarrierSectionFormSubmit(
+  sessionId: string,
+  session: AssistantSessionState,
+  values: Record<string, string>,
+): Promise<ChatApiSuccessBody> {
+  const def = getWorkflowDefinition("update_carrier")!;
+  const data = session.collectedParams;
+  const catRaw = data.updateCategory;
+  if (typeof catRaw !== "string" || !isUpdateCategoryId(catRaw)) {
+    const msg = "Choose a section again.";
+    const s2 = updateSession(sessionId, {
+      updateCarrierUiPhase: "pick_category",
+      awaitingConfirmation: false,
+      phase: "collecting",
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+  const cat = catRaw as UpdateCategoryId;
+  const base = { ...data };
+  const vr = validateAndMergeUpdateCarrierSection(base, cat, values);
+  if (!vr.ok) {
+    const failMsg = vr.formLevelError ?? "Check the form below.";
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(failMsg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: failMsg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: {
+        step: "section_form",
+        carrierCode: String(base.carrierCode ?? "").toUpperCase(),
+        categoryId: cat,
+        categoryLabel: UPDATE_CATEGORY_LABELS[cat],
+        form: buildUpdateSectionFormStateFromStrings(
+          cat,
+          values,
+          vr.errors,
+          vr.formLevelError,
+        ),
+      },
+    });
+  }
+
+  const { cardText, summaryCard } = resolveConfirmationUi(def, vr.merged);
+  const session2 = updateSession(sessionId, {
+    collectedParams: vr.merged,
+    updateCarrierUiPhase: "section_confirm",
+    phase: "confirming",
+    awaitingConfirmation: true,
+    appendToHistory: [assistantMessage(cardText)],
+  });
+  return composeBody(session2, {
+    responseType: "confirm",
+    message: cardText,
+    summaryCard,
+    missingFields: [],
+    awaitingConfirmation: true,
+    createCarrierDraftForm: null,
+    updateCarrierFlow: null,
+  });
+}
+
+function handleUpdateCarrierNavigate(
+  sessionId: string,
+  session: AssistantSessionState,
+  target: "back_carrier_code" | "back_categories",
+): ChatApiSuccessBody {
+  if (target === "back_carrier_code") {
+    if (session.updateCarrierUiPhase !== "pick_category") {
+      const s = getSession(sessionId);
+      return composeBody(s, {
+        responseType: "needs_input",
+        message: "Use Back on the section list.",
+        awaitingConfirmation: false,
+      });
+    }
+    const msg = "Enter the **carrier code** below.";
+    const s2 = updateSession(sessionId, {
+      collectedParams: {},
+      updateCarrierUiPhase: "need_code",
+      phase: "collecting",
+      awaitingConfirmation: false,
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "needs_input",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+
+  const ph = session.updateCarrierUiPhase;
+  if (ph !== "section_form" && ph !== "section_confirm") {
+    const s = getSession(sessionId);
+    return composeBody(s, {
+      responseType: "needs_input",
+      message: "Open a section form first.",
+      awaitingConfirmation: false,
+    });
+  }
+
+  const cat = session.collectedParams.updateCategory;
+  let nextCollected: Record<string, unknown>;
+  if (typeof cat === "string" && isUpdateCategoryId(cat)) {
+    nextCollected = stripUpdateCategoryKeysFromCollected(
+      session.collectedParams,
+      cat,
+    );
+  } else {
+    nextCollected = { ...session.collectedParams };
+    delete nextCollected.updateCategory;
+  }
+
+  const codeVal = validateCarrierCode(nextCollected.carrierCode);
+  if (!codeVal.ok) {
+    const msg = "Enter a valid carrier code below.";
+    const s2 = updateSession(sessionId, {
+      collectedParams: {},
+      updateCarrierUiPhase: "need_code",
+      phase: "collecting",
+      awaitingConfirmation: false,
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "needs_input",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+
+  nextCollected.carrierCode = String(codeVal.normalized);
+  const msg = "Pick a section to update, or change the code from the list.";
+  const s2 = updateSession(sessionId, {
+    collectedParams: nextCollected,
+    updateCarrierUiPhase: "pick_category",
+    phase: "collecting",
+    awaitingConfirmation: false,
+    appendToHistory: [assistantMessage(msg)],
+  });
+  return composeBody(s2, {
+    responseType: "needs_input",
+    message: msg,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+  });
+}
+
+function handleUpdateCarrierFormCollectingMerge(
+  sessionId: string,
+  session: AssistantSessionState,
+  def: WorkflowDefinition,
+  merged: Record<string, unknown>,
+  rejected: { key: string; error: string }[],
+  analysis: IntentAnalysisResult,
+): ChatApiSuccessBody {
+  const phase = session.updateCarrierUiPhase ?? "none";
+  const preamble = analysis.naturalPreamble;
+  const followUp = analysis.suggestedFollowUp;
+
+  if (phase === "need_code") {
+    const codeVal = validateCarrierCode(merged.carrierCode);
+    if (codeVal.ok) {
+      const msg = [
+        preamble,
+        `**${codeVal.normalized}** — pick a section.`,
+        followUp,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const session2 = updateSession(sessionId, {
+        collectedParams: { carrierCode: codeVal.normalized },
+        updateCarrierUiPhase: "pick_category",
+        appendToHistory: [assistantMessage(msg)],
+      });
+      return composeBody(session2, {
+        responseType: "needs_input",
+        message: msg,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: null,
+      });
+    }
+    const err = rejected.find((r) => r.key === "carrierCode");
+    const msg = [
+      preamble,
+      err?.error,
+      "Enter a valid 4-character carrier code.",
+      followUp,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: err ? "error" : "needs_input",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: err
+        ? { step: "need_code", codeError: err.error }
+        : undefined,
+    });
+  }
+
+  if (phase === "pick_category") {
+    const catVal = validateUpdateCategory(merged.updateCategory);
+    if (catVal.ok) {
+      const cat = catVal.normalized as UpdateCategoryId;
+      const codeRes = validateCarrierCode(session.collectedParams.carrierCode);
+      const mergedParams = {
+        ...session.collectedParams,
+        ...merged,
+        carrierCode: codeRes.ok ? codeRes.normalized : session.collectedParams.carrierCode,
+        updateCategory: cat,
+      };
+      const msg = [
+        preamble,
+        `**${UPDATE_CATEGORY_LABELS[cat]}** — use the form for changes.`,
+        followUp,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const session2 = updateSession(sessionId, {
+        collectedParams: mergedParams,
+        updateCarrierUiPhase: "section_form",
+        appendToHistory: [assistantMessage(msg)],
+      });
+      return composeBody(session2, {
+        responseType: "needs_input",
+        message: msg,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: null,
+      });
+    }
+    const err = rejected.find((r) => r.key === "updateCategory");
+    const msg = [
+      preamble,
+      err?.error ?? catVal.error,
+      "Pick a section from the list.",
+      followUp,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const codeOk = validateCarrierCode(session.collectedParams.carrierCode);
+    const code = codeOk.ok ? String(codeOk.normalized) : "";
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: {
+        step: "pick_category",
+        carrierCode: code,
+        categories: listUpdateCarrierCategories(),
+        categoryError: err?.error ?? catVal.error,
+      },
+    });
+  }
+
+  const errors = rejectedToErrorMap(rejected);
+  const hint =
+    rejected.length > 0
+      ? "Some values weren’t applied — see the form."
+      : "Your message was applied to the form below.";
+  const msg = [preamble, hint, followUp].filter(Boolean).join("\n\n");
+  const mergedParams = {
+    ...session.collectedParams,
+    ...merged,
+  };
+  const catRaw =
+    mergedParams.updateCategory ?? session.collectedParams.updateCategory;
+  const s2 = updateSession(sessionId, {
+    collectedParams: mergedParams,
+    appendToHistory: [assistantMessage(msg)],
+  });
+  if (typeof catRaw !== "string" || !isUpdateCategoryId(catRaw)) {
+    return composeBody(s2, {
+      responseType: "needs_input",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+  const cid = catRaw as UpdateCategoryId;
+  return composeBody(s2, {
+    responseType: rejected.length > 0 ? "error" : "needs_input",
+    message: msg,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+    updateCarrierFlow: {
+      step: "section_form",
+      carrierCode: String(mergedParams.carrierCode ?? "").toUpperCase(),
+      categoryId: cid,
+      categoryLabel: UPDATE_CATEGORY_LABELS[cid],
+      form: buildUpdateSectionFormState(mergedParams, cid, errors),
+    },
+  });
+}
+
 async function continueAfterMerge(
   sessionId: string,
   def: WorkflowDefinition,
@@ -282,8 +1365,50 @@ async function continueAfterMerge(
   const preamble = analysis.naturalPreamble;
   const followUp = analysis.suggestedFollowUp;
 
-  if (def.id === "update_carrier") {
-    return continueUpdateCarrierFromMerge(
+  if (def.id === "create_carrier_draft") {
+    const missingCreate = getMissingFields(def, merged);
+    if (missingCreate.length > 0) {
+      const pk = missingCreate[0]!;
+      const field = findFieldDef(def, pk, merged)!;
+      const message = buildCreateCarrierCollectingMessage({
+        missingCount: missingCreate.length,
+        fieldPrompt: field.businessPrompt,
+        preamble,
+        followUp,
+      });
+      const cur = getSession(sessionId);
+      const session = updateSession(sessionId, {
+        currentWorkflowId: def.id,
+        phase: "collecting",
+        collectedParams: merged,
+        missingFieldKeys: missingCreate,
+        pendingFieldKey: pk,
+        awaitingConfirmation: false,
+        optionalFieldQueue: [],
+        createCarrierSkipOptionalWalkthrough: false,
+        createCarrierFormFirst: false,
+        step: cur.step + 1,
+        appendToHistory: [assistantMessage(message)],
+      });
+      return composeBody(session, {
+        responseType: "needs_input",
+        message,
+        missingFields: missingCreate,
+        awaitingConfirmation: false,
+        createCarrierDraftForm: null,
+      });
+    }
+    const curSkip = getSession(sessionId);
+    if (curSkip.createCarrierSkipOptionalWalkthrough) {
+      return transitionCreateCarrierToConfirmOrForm(
+        sessionId,
+        def,
+        merged,
+        preamble,
+        followUp,
+      );
+    }
+    return continueCreateCarrierDraftAfterRequired(
       sessionId,
       def,
       merged,
@@ -297,20 +1422,13 @@ async function continueAfterMerge(
     const pk = missing[0]!;
     const field = findFieldDef(def, pk, merged)!;
     const message =
-      def.id === "create_carrier_draft"
-        ? buildCreateCarrierCollectingMessage({
-            missingCount: missing.length,
+      def.id === "find_carrier"
+        ? buildFindCarrierCollectingMessage({
             fieldPrompt: field.businessPrompt,
             preamble,
             followUp,
           })
-        : def.id === "find_carrier"
-          ? buildFindCarrierCollectingMessage({
-              fieldPrompt: field.businessPrompt,
-              preamble,
-              followUp,
-            })
-          : [preamble, field.businessPrompt, followUp].filter(Boolean).join("\n\n");
+        : [preamble, field.businessPrompt, followUp].filter(Boolean).join("\n\n");
     const cur = getSession(sessionId);
     const session = updateSession(sessionId, {
       currentWorkflowId: def.id,
@@ -370,7 +1488,7 @@ function continueUpdateCarrierFromMerge(
     const field = findFieldDef(def, pk, merged)!;
     const bridge =
       pk === "carrierCode"
-        ? "I’ll update the details for you — first I need to know which carrier we’re working with."
+        ? "Which carrier? Enter the code."
         : undefined;
     const message = [preamble, bridge, field.businessPrompt, followUp]
       .filter(Boolean)
@@ -396,7 +1514,7 @@ function continueUpdateCarrierFromMerge(
   const queue = getOptionalFieldKeysInOrder(def, merged);
   const pk = queue[0] ?? null;
   if (!pk) {
-    const msg = "This update flow needs optional fields configured.";
+    const msg = "Update flow isn’t configured.";
     const session = updateSession(sessionId, {
       ...WORKFLOW_RESET,
       appendToHistory: [assistantMessage(msg)],
@@ -579,6 +1697,21 @@ async function handleIdleTurn(
     {},
     extractedToRecord(analysis.extractedFields),
   );
+
+  if (def.id === "create_carrier_draft") {
+    return startCreateCarrierWithForm(
+      sessionId,
+      def,
+      merged,
+      analysis,
+      rejected,
+    );
+  }
+
+  if (def.id === "update_carrier") {
+    return startUpdateCarrierFormFlow(sessionId, def, merged, analysis, rejected);
+  }
+
   if (
     rejected.length > 0 &&
     getRequiredFieldDefinitions(def, merged).some((f) =>
@@ -589,24 +1722,18 @@ async function handleIdleTurn(
     const miss = getMissingFields(def, merged);
     const nextField = findFieldDef(def, miss[0] ?? first.key, merged);
     const message =
-      def.id === "create_carrier_draft" && nextField
-        ? buildCreateCarrierCollectingMessage({
-            missingCount: miss.length,
+      def.id === "find_carrier" && nextField
+        ? buildFindCarrierCollectingMessage({
             fieldPrompt: nextField.businessPrompt,
             preamble: [analysis.naturalPreamble, first.error].filter(Boolean).join("\n\n"),
           })
-        : def.id === "find_carrier" && nextField
-          ? buildFindCarrierCollectingMessage({
-              fieldPrompt: nextField.businessPrompt,
-              preamble: [analysis.naturalPreamble, first.error].filter(Boolean).join("\n\n"),
-            })
-          : [
-              analysis.naturalPreamble,
-              first.error,
-              nextField?.businessPrompt,
-            ]
-              .filter(Boolean)
-              .join("\n\n");
+        : [
+            analysis.naturalPreamble,
+            first.error,
+            nextField?.businessPrompt,
+          ]
+            .filter(Boolean)
+            .join("\n\n");
     const s3 = updateSession(sessionId, {
       currentWorkflowId: def.id,
       phase: "collecting",
@@ -614,6 +1741,8 @@ async function handleIdleTurn(
       missingFieldKeys: miss,
       pendingFieldKey: miss[0] ?? null,
       optionalFieldQueue: [],
+      createCarrierSkipOptionalWalkthrough: false,
+      createCarrierFormFirst: false,
       appendToHistory: [assistantMessage(message)],
     });
     return composeBody(s3, {
@@ -656,8 +1785,55 @@ async function handleCollectingTurn(
     extractedToRecord(analysis.extractedFields),
   );
 
+  if (def.id === "create_carrier_draft" && (session.createCarrierFormFirst ?? false)) {
+    const errors = rejectedToErrorMap(rejected);
+    const hint =
+      rejected.length > 0
+        ? "Some values weren’t applied — check the form."
+        : "Applied to the form below. Submit to continue.";
+    const message = [analysis.naturalPreamble, hint, analysis.suggestedFollowUp]
+      .filter(Boolean)
+      .join("\n\n");
+    const s2 = updateSession(sessionId, {
+      collectedParams: merged,
+      missingFieldKeys: [],
+      pendingFieldKey: null,
+      optionalFieldQueue: [],
+      appendToHistory: [assistantMessage(message)],
+    });
+    return composeBody(s2, {
+      responseType: rejected.length > 0 ? "error" : "needs_input",
+      message,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: buildCreateCarrierDraftFormState(merged, errors),
+    });
+  }
+
   if (def.id === "update_carrier") {
+    const uPhase = session.updateCarrierUiPhase ?? "none";
+    if (uPhase !== "none" && uPhase !== "section_confirm") {
+      return handleUpdateCarrierFormCollectingMerge(
+        sessionId,
+        session,
+        def,
+        merged,
+        rejected,
+        analysis,
+      );
+    }
     return handleUpdateCarrierCollecting(
+      sessionId,
+      def,
+      session,
+      merged,
+      rejected,
+      analysis,
+    );
+  }
+
+  if (def.id === "create_carrier_draft" && session.optionalFieldQueue.length > 0) {
+    return handleCreateCarrierCollecting(
       sessionId,
       def,
       session,
@@ -703,6 +1879,19 @@ async function handleCollectingTurn(
     });
   }
 
+  if (
+    def.id === "create_carrier_draft" &&
+    (session.createCarrierSkipOptionalWalkthrough ?? false)
+  ) {
+    return transitionCreateCarrierToConfirmOrForm(
+      sessionId,
+      def,
+      merged,
+      analysis.naturalPreamble,
+      analysis.suggestedFollowUp,
+    );
+  }
+
   return await continueAfterMerge(sessionId, def, merged, analysis);
 }
 
@@ -712,25 +1901,68 @@ async function handleConfirmTurn(
   session: AssistantSessionState,
 ): Promise<ChatApiSuccessBody> {
   const decision = parseConfirmation(text);
+  const live = getSession(sessionId);
+
+  if (
+    live.currentWorkflowId === "update_carrier" &&
+    live.updateCarrierUiPhase === "section_confirm"
+  ) {
+    if (decision === "no") {
+      const msg = "Adjust the form below, then submit again.";
+      const s2 = updateSession(sessionId, {
+        updateCarrierUiPhase: "section_form",
+        awaitingConfirmation: false,
+        phase: "collecting",
+        appendToHistory: [assistantMessage(msg)],
+      });
+      return composeBody(s2, {
+        responseType: "needs_input",
+        message: msg,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: null,
+      });
+    }
+    if (decision === "yes") {
+      return await executeUpdateCarrierAfterSectionConfirm(
+        sessionId,
+        getSession(sessionId),
+      );
+    }
+    const defU = getWorkflowDefinition("update_carrier")!;
+    const { cardText, summaryCard } = resolveConfirmationUi(
+      defU,
+      live.collectedParams,
+    );
+    const msg = "**Yes** to apply, **no** to edit, or use **Choose a different section**.";
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "confirm",
+      message: [msg, "", cardText].filter(Boolean).join("\n\n"),
+      summaryCard,
+      awaitingConfirmation: true,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: null,
+    });
+  }
+
   if (decision === "no") {
     const s2 = updateSession(sessionId, {
       ...WORKFLOW_RESET,
       appendToHistory: [
-        assistantMessage(
-          "No problem — we’ve stopped that. What would you like to do instead?",
-        ),
+        assistantMessage("Cancelled. What next?"),
       ],
     });
     return composeBody(s2, {
       responseType: "needs_input",
-      message:
-        "No problem — we’ve stopped that. What would you like to do instead?",
+      message: "Cancelled. What next?",
       awaitingConfirmation: false,
     });
   }
   if (decision !== "yes") {
-    const msg =
-      "Please reply yes to continue, or no to cancel.";
+    const msg = "Reply **yes** or **no**.";
     const s2 = updateSession(sessionId, {
       appendToHistory: [assistantMessage(msg)],
     });
@@ -746,9 +1978,38 @@ async function handleConfirmTurn(
     const s2 = updateSession(sessionId, { ...WORKFLOW_RESET });
     return composeBody(s2, {
       responseType: "error",
-      message: "Something went sideways on our end. Let’s start fresh — what would you like to do?",
+      message: "Error. Start fresh — what do you need?",
       awaitingConfirmation: false,
     });
+  }
+
+  if (def.id === "create_carrier_draft") {
+    const vr = validateCollectedParamsBeforeExecute(
+      def,
+      session.collectedParams,
+    );
+    if (!vr.ok) {
+      const sForm = updateSession(sessionId, {
+        phase: "collecting",
+        awaitingConfirmation: false,
+        pendingFieldKey: null,
+        optionalFieldQueue: [],
+        missingFieldKeys: [],
+        createCarrierSkipOptionalWalkthrough: true,
+        createCarrierFormFirst: true,
+        appendToHistory: [assistantMessage(CREATE_DRAFT_FORM_FAIL_COPY)],
+      });
+      return composeBody(sForm, {
+        responseType: "needs_input",
+        message: CREATE_DRAFT_FORM_FAIL_COPY,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: buildCreateCarrierDraftFormState(
+          session.collectedParams,
+          vr.errors,
+        ),
+      });
+    }
   }
 
   try {
@@ -758,13 +2019,36 @@ async function handleConfirmTurn(
       ...WORKFLOW_RESET,
       appendToHistory: [assistantMessage(formatted.message)],
     });
+    const summaryCard =
+      def.id === "update_carrier"
+        ? {
+            title: "Updated" as const,
+            fields: buildUpdateSuccessSummaryCardFields(
+              result as CarrierDetails,
+              session.collectedParams,
+            ),
+          }
+        : buildSuccessSummaryCard(def, formatted);
     return composeBody(s2, {
       responseType: "success",
       message: formatted.message,
-      summaryCard: buildSuccessSummaryCard(def, formatted),
-      resultData: undefined,
+      summaryCard,
+      resultData:
+        def.id === "create_carrier_draft" || def.id === "update_carrier"
+          ? result
+          : undefined,
+      displayWorkflowId:
+        def.id === "create_carrier_draft" || def.id === "update_carrier"
+          ? def.id
+          : undefined,
+      displayWorkflowName:
+        def.id === "create_carrier_draft" || def.id === "update_carrier"
+          ? def.userFacingLabel
+          : undefined,
       missingFields: [],
       awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: null,
     });
   } catch (e) {
     const msg = formatChatWorkflowError(e, def, session.collectedParams);
@@ -782,16 +2066,114 @@ async function handleConfirmTurn(
 export async function handleChatTurn(input: {
   sessionId: string;
   message: string;
+  createCarrierDraftForm?: Record<string, unknown>;
+  updateCarrierCode?: string;
+  updateCarrierCategoryId?: string;
+  updateCarrierSectionForm?: Record<string, string>;
+  updateCarrierNavigate?: "back_carrier_code" | "back_categories";
 }): Promise<ChatApiSuccessBody> {
   const sessionId = input.sessionId.trim();
   const text = input.message.trim();
   let session = getSession(sessionId);
 
+  const draftForm = input.createCarrierDraftForm;
+  if (
+    draftForm &&
+    typeof draftForm === "object" &&
+    !Array.isArray(draftForm) &&
+    session.currentWorkflowId === "create_carrier_draft"
+  ) {
+    session = updateSession(sessionId, {
+      appendToHistory: [
+        userMessage("Submitted draft form."),
+      ],
+    });
+    return await handleCreateCarrierDraftFormSubmit(
+      sessionId,
+      getSession(sessionId),
+      draftForm,
+    );
+  }
+
+  const navigate = input.updateCarrierNavigate;
+  if (
+    (navigate === "back_carrier_code" || navigate === "back_categories") &&
+    session.currentWorkflowId === "update_carrier"
+  ) {
+    session = updateSession(sessionId, {
+      appendToHistory: [
+        userMessage(
+          navigate === "back_carrier_code"
+            ? "Change carrier code."
+            : "Choose a different section.",
+        ),
+      ],
+    });
+    return handleUpdateCarrierNavigate(
+      sessionId,
+      getSession(sessionId),
+      navigate,
+    );
+  }
+
+  const sectionForm = input.updateCarrierSectionForm;
+  if (
+    sectionForm &&
+    typeof sectionForm === "object" &&
+    !Array.isArray(sectionForm) &&
+    session.currentWorkflowId === "update_carrier" &&
+    session.updateCarrierUiPhase === "section_form"
+  ) {
+    session = updateSession(sessionId, {
+      appendToHistory: [
+        userMessage("Submitted update form."),
+      ],
+    });
+    return await handleUpdateCarrierSectionFormSubmit(
+      sessionId,
+      getSession(sessionId),
+      sectionForm,
+    );
+  }
+
+  const updCategoryId = input.updateCarrierCategoryId;
+  if (
+    typeof updCategoryId === "string" &&
+    updCategoryId.trim() &&
+    session.currentWorkflowId === "update_carrier" &&
+    session.updateCarrierUiPhase === "pick_category"
+  ) {
+    session = updateSession(sessionId, {
+      appendToHistory: [
+        userMessage(`Selected section: ${updCategoryId.trim()}.`),
+      ],
+    });
+    return handleUpdateCarrierCategorySubmit(
+      sessionId,
+      getSession(sessionId),
+      updCategoryId.trim(),
+    );
+  }
+
+  const updCode = input.updateCarrierCode;
+  if (
+    typeof updCode === "string" &&
+    updCode.trim() &&
+    session.currentWorkflowId === "update_carrier" &&
+    session.updateCarrierUiPhase === "need_code"
+  ) {
+    const c = updCode.trim();
+    session = updateSession(sessionId, {
+      appendToHistory: [userMessage(`Entered carrier code ${c.toUpperCase()}.`)],
+    });
+    return handleUpdateCarrierCodeSubmit(sessionId, c);
+  }
+
   if (session.conversationHistory.length === 0 && !text) {
     const greeting = [
-      "Hello — I’m your carrier operations assistant.",
+      CHAT_AGENT_TITLE + ".",
       "",
-      "Tell me what you’re trying to do in plain language, or choose a quick action below. I’ll guide you step by step.",
+      "Type what you need or pick an action below.",
     ].join("\n");
     session = updateSession(sessionId, {
       appendToHistory: [assistantMessage(greeting)],
@@ -801,11 +2183,10 @@ export async function handleChatTurn(input: {
       message: greeting,
       summaryCard: {
         lines: [
-          "Set up a new carrier",
-          "Look up a carrier by code",
-          "View the carrier list",
-          "Open the reference list",
-          "Update carrier information",
+          "New carrier",
+          "Lookup by code",
+          "List carriers",
+          "Update carrier",
         ],
       },
       awaitingConfirmation: false,
@@ -813,8 +2194,7 @@ export async function handleChatTurn(input: {
   }
 
   if (!text) {
-    const msg =
-      "Go ahead and type what you need, or pick up where we left off.";
+    const msg = "Type a message to continue.";
     session = updateSession(sessionId, {
       appendToHistory: [assistantMessage(msg)],
     });
@@ -833,14 +2213,12 @@ export async function handleChatTurn(input: {
     session = updateSession(sessionId, {
       ...WORKFLOW_RESET,
       appendToHistory: [
-        assistantMessage(
-          "Starting fresh. What would you like to work on next?",
-        ),
+        assistantMessage("Starting fresh. What next?"),
       ],
     });
     return composeBody(session, {
       responseType: "needs_input",
-      message: "Starting fresh. What would you like to work on next?",
+      message: "Starting fresh. What next?",
       awaitingConfirmation: false,
     });
   }

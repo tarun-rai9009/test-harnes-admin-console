@@ -2,17 +2,20 @@
  * Zinnia carrier API — request/response shapes aligned with REST endpoints.
  */
 
-/** POST /carriers/draft */
+/**
+ * POST /carriers/draft — aligned with `openapi.yaml` CreateCarrierDraftRequest.
+ * Required: carrierCode, entityType, carrierName, organizationName.
+ */
 export type CreateCarrierDraftPayload = {
-  lineOfBusiness: string;
-  productTypes: string[];
   carrierCode: string;
-  ultimateParentCompanyId: string;
-  parentCompanyId: string;
   entityType: string;
   carrierName: string;
   organizationName: string;
-  organizationDba: string;
+  lineOfBusiness?: string;
+  productTypes?: string[];
+  ultimateParentCompanyId?: string | null;
+  parentCompanyId?: string | null;
+  organizationDba?: string | null;
 };
 
 /** PUT /carriers/{carrierCode} — nested sections supported by the API. */
@@ -30,13 +33,15 @@ export type UpdateCarrierBaseIdentifiers = {
 };
 
 export type UpdateCarrierBaseRegulatory = {
-  foundedYear?: string | number;
+  foundedYear?: number;
   lineOfBusiness?: string;
-  authorizedJurisdictionStates?: string;
+  /** OpenAPI: array of state/jurisdiction strings */
+  authorizedJurisdictionStates?: string[];
   rating?: string;
   tpaNonTpa?: string;
-  isC2CRplParticipant?: boolean;
-  use1035YP?: boolean;
+  /** OpenAPI `YnEnum`: Y | N (not JSON boolean) */
+  isC2CRplParticipant?: "Y" | "N";
+  use1035YP?: "Y" | "N";
 };
 
 export type UpdateCarrierBusinessHoliday = {
@@ -103,10 +108,13 @@ export type UpdateCarrierBaseSection = {
   lineOfBusiness?: string;
   productTypes?: string[];
   urls?: UpdateCarrierBaseUrls;
-  identifiers?: UpdateCarrierBaseIdentifiers;
-  regulatory?: UpdateCarrierBaseRegulatory;
+  /** OpenAPI: array of identifier rows on CarrierBase */
+  identifiers?: UpdateCarrierBaseIdentifiers[];
+  /** OpenAPI: array of regulatory rows on CarrierBase */
+  regulatory?: UpdateCarrierBaseRegulatory[];
   businessHolidays?: UpdateCarrierBusinessHoliday[];
-  hoursOfOperation?: UpdateCarrierHoursOfOperation;
+  /** OpenAPI: array of CarrierHoursOfOperation */
+  hoursOfOperation?: UpdateCarrierHoursOfOperation[];
 };
 
 export type UpdateCarrierConnectorsSection = {
@@ -141,6 +149,28 @@ export type CarrierDetails = CarrierSummary & {
   ultimateParentCompanyId?: string;
   parentCompanyId?: string;
   organizationDba?: string;
+};
+
+/**
+ * GET /carriers/{carrierCode} full body per OpenAPI `CarrierResponse` (nested `base`, contacts, etc.).
+ * Used for typing API responses; UI maps unknown fields safely.
+ */
+export type CarrierGetResponse = CarrierDetails & {
+  id?: string;
+  version?: string | null;
+  status?: string;
+  base?: UpdateCarrierBaseSection & {
+    /** OpenAPI: array of URL rows; some payloads may send a single object */
+    urls?: UpdateCarrierBaseUrls | UpdateCarrierBaseUrls[];
+  };
+  connectors?: UpdateCarrierConnectorsSection;
+  addresses?: UpdateCarrierAddress[];
+  phones?: UpdateCarrierPhone[];
+  emails?: UpdateCarrierEmail[];
+  createdBy?: string;
+  createdAt?: string;
+  updatedBy?: string;
+  updatedAt?: string;
 };
 
 /** Raw list response if the API wraps the array (normalize in the client). */

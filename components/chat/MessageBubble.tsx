@@ -2,6 +2,7 @@
 
 import type { ChatMessage } from "@/types/chat";
 import { AssistantAvatar } from "@/components/chat/AssistantAvatar";
+import { CHAT_AGENT_TITLE } from "@/lib/branding";
 
 type Props = {
   message: ChatMessage;
@@ -21,16 +22,16 @@ export function MessageBubble({
 
   const assistantTone =
     variant === "error"
-      ? "border-red-200/90 bg-red-50/90 text-foreground shadow-[var(--card-shadow)]"
+      ? "border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] text-foreground shadow-[var(--card-shadow-sm)]"
       : variant === "success"
-        ? "border-emerald-200/80 bg-emerald-50/80 text-foreground shadow-[var(--card-shadow)]"
-        : "border-border/90 bg-surface text-foreground shadow-[var(--card-shadow)]";
+        ? "border-[color:var(--success-border)] bg-[color:var(--success-bg)] text-foreground shadow-[var(--card-shadow-sm)]"
+        : "border-border bg-surface text-foreground shadow-[var(--card-shadow-sm)]";
 
   if (isUser) {
     return (
       <div className="flex justify-end">
         <div
-          className="max-w-[min(88%,30rem)] rounded-2xl rounded-br-sm border border-accent/15 bg-accent/[0.07] px-[1.125rem] py-3.5 text-[15px] leading-[1.55] text-foreground shadow-[var(--card-shadow)]"
+          className="max-w-[min(88%,42rem)] rounded-xl rounded-br-sm border border-[color:var(--user-bubble-border)] bg-[color:var(--user-bubble-bg)] px-[1.125rem] py-3.5 text-[15px] leading-[1.55] text-foreground shadow-[var(--card-shadow-sm)]"
           role="article"
           aria-label="Your message"
         >
@@ -42,9 +43,9 @@ export function MessageBubble({
 
   const bubble = (
     <div
-      className={`max-w-[min(92%,36rem)] rounded-2xl rounded-tl-sm border px-[1.125rem] py-3.5 text-[15px] leading-[1.55] ${assistantTone}`}
+      className={`max-w-[min(92%,50rem)] rounded-xl rounded-tl-sm border px-[1.125rem] py-3.5 text-[15px] leading-[1.55] ${assistantTone}`}
       role="article"
-      aria-label="Assistant message"
+      aria-label={`${CHAT_AGENT_TITLE} message`}
     >
       <p className="whitespace-pre-wrap text-foreground/95">{message.content}</p>
     </div>

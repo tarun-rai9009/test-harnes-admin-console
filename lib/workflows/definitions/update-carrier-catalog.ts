@@ -36,8 +36,7 @@ export function validateUpdateCategory(raw: unknown): FieldValidationResult {
   if (!s) {
     return {
       ok: false,
-      error:
-        "Which area should we update? You can name it (for example “URLs” or “addresses”) or pick a number from the list.",
+      error: "Pick a section name or a number from the list.",
     };
   }
   const t = s.toLowerCase();
@@ -100,8 +99,7 @@ export function validateUpdateCategory(raw: unknown): FieldValidationResult {
 
   return {
     ok: false,
-    error:
-      "I didn’t match that to a section. Try a name like “basic details”, “phones”, or “regulatory”, or reply with a number 1–11 from the list.",
+    error: "No match. Try “basic details”, “phones”, or a list number.",
   };
 }
 
@@ -109,38 +107,21 @@ function categoryPromptText(): string {
   const lines = UPDATE_CATEGORY_ORDER.map(
     (id, i) => `${i + 1}. ${UPDATE_CATEGORY_LABELS[id]}`,
   );
-  return [
-    "Which part of this carrier should we update? Reply with the name or a number.",
-    "",
-    ...lines,
-    "",
-    "What would you like to update?",
-  ].join("\n");
+  return ["Pick a section (name or number):", "", ...lines].join("\n");
 }
 
 const INTROS: Record<UpdateCategoryId, string> = {
-  basic_details:
-    "I’ll go through the basics — IDs, name, entity type, line of business, and product types. Say skip for anything that should stay the same.",
-  org_hierarchy:
-    "We’ll update organization and hierarchy details — parents, legal name, DBA, short name, and logo reference. Say skip when you’re not changing something.",
-  urls:
-    "We’ll update web and login links — main site, carrier, agent, and customer logins. Say skip for any you’re leaving as-is.",
-  identifiers:
-    "We’ll capture the identifier type and value (for example a registration or reference ID). Say skip if you’re not changing this.",
-  regulatory:
-    "We’ll update regulatory fields — year founded, jurisdictions, rating, TPA flags, and related yes/no items. Say skip where nothing changes.",
-  business_holidays:
-    "We’ll add or update one holiday entry — name, type, and when it occurs. Say skip if you’re not changing holidays.",
-  hours_operation:
-    "We’ll update hours of operation — start, end, days, and time zone. Say skip for anything unchanged.",
-  connectors:
-    "We’ll update connector IDs — you can provide DTCC and/or C2C participant and location IDs. Say skip for either side you’re not changing.",
-  addresses:
-    "We’ll update one address — type, lines, city, state, ZIP, country, and effective dates. Say skip for fields that stay the same.",
-  phones:
-    "We’ll update one phone record — type, country and area codes, number, extension, and dates. Say skip where needed.",
-  emails:
-    "We’ll update one email — type, address, and effective dates. Say skip if a field stays the same.",
+  basic_details: "Basics — say **skip** to leave unchanged.",
+  org_hierarchy: "Org / hierarchy — say **skip** to leave unchanged.",
+  urls: "URLs / logins — say **skip** to leave unchanged.",
+  identifiers: "Identifier — say **skip** if unchanged.",
+  regulatory: "Regulatory — say **skip** if unchanged.",
+  business_holidays: "Holiday row — say **skip** if unchanged.",
+  hours_operation: "Hours — say **skip** if unchanged.",
+  connectors: "Connectors — say **skip** if unchanged.",
+  addresses: "Address — say **skip** for unchanged fields.",
+  phones: "Phone — say **skip** for unchanged fields.",
+  emails: "Email — say **skip** for unchanged fields.",
 };
 
 export function getUpdateCarrierOptionalIntro(
@@ -148,11 +129,11 @@ export function getUpdateCarrierOptionalIntro(
 ): string {
   const cat = merged.updateCategory as UpdateCategoryId | undefined;
   if (cat && INTROS[cat]) return INTROS[cat];
-  return "Share the new values below. Say skip for anything that should stay as-is.";
+  return "New values below — **skip** if unchanged.";
 }
 
 export function getUpdateCarrierNoChangesMessage(): string {
-  return "I need at least one value in this section to send an update. Please fill in a field you want changed, or say skip only when that field truly stays the same.";
+  return "Change at least one field, or only **skip** what stays the same.";
 }
 
 export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
@@ -163,8 +144,7 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         key: "carrierCode",
         required: true,
         summaryLabel: "Carrier code",
-        businessPrompt:
-          "Which carrier should we update? Please share the carrier code your team uses.",
+        businessPrompt: "Carrier code to update?",
         validate: validateCarrierCode,
       },
     ],
@@ -192,32 +172,32 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "basic_carrierId",
         "Carrier record ID",
-        "What carrier record ID should we store? (Say skip if it’s unchanged.)",
+        "Carrier record ID? (**skip** if same)",
       ),
       opt(
         "basic_secondaryCarrierCode",
         "Secondary carrier code",
-        "Should we set or change a secondary carrier code?",
+        "Secondary code?",
       ),
       opt(
         "basic_entityType",
         "Entity type",
-        "What entity type should we show (for example corporation or LLC)?",
+        "Entity type?",
       ),
       opt(
         "basic_carrierName",
         "Carrier name",
-        "What display name should we use for this carrier?",
+        "Display name?",
       ),
       opt(
         "basic_lineOfBusiness",
         "Line of business",
-        "Which line of business should we record?",
+        "Line of business?",
       ),
       opt(
         "basic_productTypes",
         "Product types",
-        "Which product types apply? List them separated by commas.",
+        "Product types (comma-separated)?",
         validateOptionalProductTypes(),
       ),
     ],
@@ -230,32 +210,32 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "org_ultimateParentCompanyId",
         "Ultimate parent company ID",
-        "What ID should we use for the ultimate parent company?",
+        "Ultimate parent ID?",
       ),
       opt(
         "org_parentCompanyId",
         "Parent company ID",
-        "What ID should we use for the immediate parent company?",
+        "Parent company ID?",
       ),
       opt(
         "org_organizationName",
         "Legal organization name",
-        "What is the full legal organization name?",
+        "Legal org name?",
       ),
       opt(
         "org_organizationDba",
         "DBA",
-        "What doing-business-as name should we show?",
+        "DBA?",
       ),
       opt(
         "org_organizationShortName",
         "Short name",
-        "Is there a short name we should use in tight spaces?",
+        "Short name?",
       ),
       opt(
         "org_logoAssetReference",
         "Logo reference",
-        "Do you have a logo reference or asset ID to attach?",
+        "Logo reference?",
       ),
     ],
   },
@@ -267,22 +247,22 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "url_organizationDomainName",
         "Organization domain / website",
-        "What website or domain name should we list?",
+        "Domain / website?",
       ),
       opt(
         "url_carrierLoginUrl",
         "Carrier login URL",
-        "What URL should carriers use to sign in?",
+        "Carrier login URL?",
       ),
       opt(
         "url_agentLoginUrl",
         "Agent login URL",
-        "What URL should agents use to sign in?",
+        "Agent login URL?",
       ),
       opt(
         "url_customerLoginUrl",
         "Customer login URL",
-        "What URL should customers use to sign in?",
+        "Customer login URL?",
       ),
     ],
   },
@@ -294,12 +274,12 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "id_identifierType",
         "Identifier type",
-        "What kind of identifier is this (for example NAIC or FEIN)?",
+        "Identifier type (e.g. NAIC)?",
       ),
       opt(
         "id_identifierValue",
         "Identifier value",
-        "What value should we store for that identifier?",
+        "Identifier value?",
       ),
     ],
   },
@@ -311,39 +291,39 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "reg_foundedYear",
         "Year founded",
-        "What year was the organization founded? (Four digits, or skip.)",
+        "Year founded (YYYY)?",
         validateOptionalYear("year founded"),
       ),
       opt(
         "reg_lineOfBusiness",
         "Regulatory line of business",
-        "What line of business should we note for regulatory purposes?",
+        "Regulatory LOB?",
       ),
       opt(
         "reg_authorizedJurisdictionStates",
         "Authorized jurisdictions / states",
-        "Which states or jurisdictions are authorized? (List or describe.)",
+        "Authorized states / jurisdictions?",
       ),
       opt(
         "reg_rating",
         "Rating",
-        "What rating should we record, if any?",
+        "Rating?",
       ),
       opt(
         "reg_tpaNonTpa",
         "TPA / non-TPA",
-        "Any TPA or non-TPA detail we should capture?",
+        "TPA detail?",
       ),
       opt(
         "reg_isC2CRplParticipant",
         "C2C RPL participant",
-        "Is this carrier a C2C RPL participant? (Yes, no, or skip.)",
+        "C2C RPL participant? (yes/no/**skip**)",
         validateOptionalYesNo("C2C RPL participation"),
       ),
       opt(
         "reg_use1035YP",
         "1035 YP",
-        "Does the 1035 YP flag apply? (Yes, no, or skip.)",
+        "1035 YP? (yes/no/**skip**)",
         validateOptionalYesNo("1035 YP"),
       ),
     ],
@@ -356,17 +336,17 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "hol_holidayName",
         "Holiday name",
-        "What is the holiday called?",
+        "Holiday name?",
       ),
       opt(
         "hol_holidayType",
         "Holiday type",
-        "What type of holiday is it (for example company-wide or market closure)?",
+        "Holiday type?",
       ),
       opt(
         "hol_dateOrOccurrence",
         "Date or pattern",
-        "When does it occur — a specific date or a rule (for example “last Monday in May”)?",
+        "Date or pattern?",
       ),
     ],
   },
@@ -378,22 +358,22 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "hrs_businessHourStart",
         "Business day start",
-        "What time does the business day start?",
+        "Open time?",
       ),
       opt(
         "hrs_businessHourEnd",
         "Business day end",
-        "What time does the business day end?",
+        "Close time?",
       ),
       opt(
         "hrs_businessDays",
         "Business days",
-        "Which days of the week are you open?",
+        "Business days?",
       ),
       opt(
         "hrs_businessHoursTimeZone",
         "Time zone",
-        "Which time zone should we use for those hours?",
+        "Time zone?",
       ),
     ],
   },
@@ -405,22 +385,22 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "conn_dtcc_participantId",
         "DTCC participant ID",
-        "What DTCC participant ID should we use? (Skip if not updating.)",
+        "DTCC participant ID?",
       ),
       opt(
         "conn_dtcc_locationId",
         "DTCC location ID",
-        "What DTCC location ID should we use?",
+        "DTCC location ID?",
       ),
       opt(
         "conn_c2c_participantId",
         "C2C participant ID",
-        "What C2C-connected carrier participant ID should we use?",
+        "C2C participant ID?",
       ),
       opt(
         "conn_c2c_locationId",
         "C2C location ID",
-        "What C2C location ID should we use?",
+        "C2C location ID?",
       ),
     ],
   },
@@ -432,26 +412,26 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
       opt(
         "addr_addressType",
         "Address type",
-        "What type of address is this (for example mailing or headquarters)?",
+        "Address type?",
       ),
-      opt("addr_addressLine1", "Address line 1", "What is address line 1?"),
-      opt("addr_addressLine2", "Address line 2", "What is address line 2?"),
-      opt("addr_addressLine3", "Address line 3", "What is address line 3?"),
-      opt("addr_city", "City", "What city?"),
-      opt("addr_state", "State / province", "What state or province?"),
-      opt("addr_addressZipCode", "ZIP / postal code", "What ZIP or postal code?"),
+      opt("addr_addressLine1", "Address line 1", "Line 1?"),
+      opt("addr_addressLine2", "Address line 2", "Line 2?"),
+      opt("addr_addressLine3", "Address line 3", "Line 3?"),
+      opt("addr_city", "City", "City?"),
+      opt("addr_state", "State / province", "State / province?"),
+      opt("addr_addressZipCode", "ZIP / postal code", "ZIP?"),
       opt(
         "addr_addressZipCodeExt",
         "ZIP extension",
-        "Any ZIP+4 extension?",
+        "ZIP+4?",
       ),
-      opt("addr_addressCountry", "Country", "What country?"),
+      opt("addr_addressCountry", "Country", "Country?"),
       opt(
         "addr_addressEffectiveDate",
         "Effective date",
-        "When should this address take effect?",
+        "Effective date?",
       ),
-      opt("addr_addressEndDate", "End date", "When should it end, if ever?"),
+      opt("addr_addressEndDate", "End date", "End date?"),
     ],
   },
   {
@@ -459,25 +439,25 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
     isActive: (d) => d.updateCategory === "phones",
     requiredFields: [],
     optionalFields: [
-      opt("phone_phoneType", "Phone type", "What kind of number is this?"),
+      opt("phone_phoneType", "Phone type", "Phone type?"),
       opt(
         "phone_countryCode",
         "Country code",
-        "What country code should we use?",
+        "Country code?",
       ),
-      opt("phone_areaCode", "Area code", "What area or region code?"),
+      opt("phone_areaCode", "Area code", "Area code?"),
       opt(
         "phone_dialNumber",
         "Phone number",
-        "What is the main phone number?",
+        "Number?",
       ),
-      opt("phone_extension", "Extension", "Any extension?"),
+      opt("phone_extension", "Extension", "Extension?"),
       opt(
         "phone_phoneEffectiveDate",
         "Effective date",
-        "When should this number take effect?",
+        "Effective date?",
       ),
-      opt("phone_phoneEndDate", "End date", "When should it stop being used?"),
+      opt("phone_phoneEndDate", "End date", "End date?"),
     ],
   },
   {
@@ -485,18 +465,18 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
     isActive: (d) => d.updateCategory === "emails",
     requiredFields: [],
     optionalFields: [
-      opt("em_emailType", "Email type", "What type of email is this?"),
+      opt("em_emailType", "Email type", "Email type?"),
       opt(
         "em_emailAddress",
         "Email address",
-        "What email address should we use?",
+        "Email?",
       ),
       opt(
         "em_emailEffectiveDate",
         "Effective date",
-        "When should this email take effect?",
+        "Effective date?",
       ),
-      opt("em_emailEndDate", "End date", "When should it stop being used?"),
+      opt("em_emailEndDate", "End date", "End date?"),
     ],
   },
 ];

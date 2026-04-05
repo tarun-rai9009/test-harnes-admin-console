@@ -7,6 +7,7 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { StructuredPanel } from "@/components/chat/StructuredPanel";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { getOrCreateSessionId, rotateSessionId } from "@/components/chat/sessionId";
+import { CHAT_AGENT_TITLE } from "@/lib/branding";
 import type { ChatAssistantApiPayload } from "@/types/chat-assistant";
 import type { ChatMessage } from "@/types/chat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +20,9 @@ type StructuredState = Pick<
   | "awaitingConfirmation"
   | "responseType"
   | "workflowName"
+  | "workflowId"
+  | "createCarrierDraftForm"
+  | "updateCarrierFlow"
 >;
 
 function pickStructured(data: ChatAssistantApiPayload): StructuredState {
@@ -29,6 +33,9 @@ function pickStructured(data: ChatAssistantApiPayload): StructuredState {
     awaitingConfirmation: data.awaitingConfirmation,
     responseType: data.responseType,
     workflowName: data.workflowName,
+    workflowId: data.workflowId,
+    createCarrierDraftForm: data.createCarrierDraftForm,
+    updateCarrierFlow: data.updateCarrierFlow,
   };
 }
 
@@ -66,8 +73,16 @@ export function ChatShell() {
     setBannerError(null);
   }, []);
 
+  type ChatExtras = {
+    createCarrierDraftForm?: Record<string, unknown>;
+    updateCarrierCode?: string;
+    updateCarrierCategoryId?: string;
+    updateCarrierSectionForm?: Record<string, string>;
+    updateCarrierNavigate?: "back_carrier_code" | "back_categories";
+  };
+
   const callChat = useCallback(
-    async (message: string) => {
+    async (message: string, extras?: ChatExtras) => {
       if (!sessionId) return;
       setLoading(true);
       setBannerError(null);
@@ -75,21 +90,39 @@ export function ChatShell() {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, message }),
+          body: JSON.stringify({
+            sessionId,
+            message,
+            ...(extras?.createCarrierDraftForm != null
+              ? { createCarrierDraftForm: extras.createCarrierDraftForm }
+              : {}),
+            ...(extras?.updateCarrierCode != null
+              ? { updateCarrierCode: extras.updateCarrierCode }
+              : {}),
+            ...(extras?.updateCarrierCategoryId != null
+              ? { updateCarrierCategoryId: extras.updateCarrierCategoryId }
+              : {}),
+            ...(extras?.updateCarrierSectionForm != null
+              ? { updateCarrierSectionForm: extras.updateCarrierSectionForm }
+              : {}),
+            ...(extras?.updateCarrierNavigate != null
+              ? { updateCarrierNavigate: extras.updateCarrierNavigate }
+              : {}),
+          }),
         });
         const data = await res.json();
         if (!res.ok) {
           setBannerError(
             typeof data.message === "string"
               ? data.message
-              : data.error || "Something went wrong.",
+              : data.error || "Error.",
           );
           return;
         }
         applySuccessPayload(data);
       } catch {
         setBannerError(
-          "We couldn’t reach the assistant. Check your connection and try again.",
+          "Can’t reach the assistant. Check connection.",
         );
       } finally {
         setLoading(false);
@@ -103,13 +136,6 @@ export function ChatShell() {
     initialized.current = true;
     void callChat("");
   }, [sessionId, callChat]);
-
-  const sendUserMessage = useCallback(
-    (text: string) => {
-      void callChat(text);
-    },
-    [callChat],
-  );
 
   const handleClear = useCallback(async () => {
     if (!sessionId) return;
@@ -142,16 +168,64 @@ export function ChatShell() {
         setBannerError(
           typeof data.message === "string"
             ? data.message
-            : "Could not start a new conversation.",
+            : "Couldn’t start a new chat.",
         );
       }
     } catch {
-      setBannerError("Could not start a new conversation.");
+      setBannerError("Couldn’t start a new chat.");
     } finally {
       setLoading(false);
       initialized.current = true;
     }
   }, [sessionId, applySuccessPayload]);
+
+  const sendUserMessage = useCallback(
+    (text: string) => {
+      const t = text.trim();
+      if (/^clear$/i.test(t)) {
+        if (!sessionId || loading) return;
+        void handleClear();
+        return;
+      }
+      void callChat(text);
+    },
+    [callChat, handleClear, loading, sessionId],
+  );
+
+  const submitCreateCarrierDraftForm = useCallback(
+    (values: Record<string, string>) => {
+      void callChat("", { createCarrierDraftForm: values });
+    },
+    [callChat],
+  );
+
+  const submitUpdateCarrierCode = useCallback(
+    (code: string) => {
+      void callChat("", { updateCarrierCode: code });
+    },
+    [callChat],
+  );
+
+  const selectUpdateCarrierCategory = useCallback(
+    (categoryId: string) => {
+      void callChat("", { updateCarrierCategoryId: categoryId });
+    },
+    [callChat],
+  );
+
+  const submitUpdateCarrierSectionForm = useCallback(
+    (values: Record<string, string>) => {
+      void callChat("", { updateCarrierSectionForm: values });
+    },
+    [callChat],
+  );
+
+  const navigateUpdateCarrier = useCallback(
+    (target: "back_carrier_code" | "back_categories") => {
+      void callChat("", { updateCarrierNavigate: target });
+    },
+    [callChat],
+  );
 
   const bubbleVariant = (index: number): "default" | "success" | "error" => {
     if (index !== lastAssistantIndex || !structured) return "default";
@@ -164,25 +238,25 @@ export function ChatShell() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <header className="border-b border-border/80 bg-surface/95 px-4 py-5 shadow-[var(--card-shadow)] backdrop-blur-sm sm:px-8">
-        <div className="mx-auto flex max-w-2xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <header className="border-b border-border bg-surface shadow-[var(--card-shadow-sm)]">
+        <div className="h-1 w-full bg-accent" aria-hidden />
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-accent-muted">
-              Internal tool
+              Admin console
             </p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-foreground sm:text-[1.35rem]">
-              Carrier operations assistant
+            <h1 className="mt-1 text-xl font-semibold tracking-tight text-foreground sm:text-[1.375rem]">
+              {CHAT_AGENT_TITLE}
             </h1>
             <p className="mt-1.5 max-w-md text-sm leading-relaxed text-accent-muted">
-              Ask in plain language. I’ll guide you through carrier setup, lookups, lists, and
-              updates — no technical steps on your side.
+              Plain language: setup, lookup, list, reference data, updates.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void handleClear()}
             disabled={loading}
-            className="shrink-0 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-background/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="ui-btn-secondary shrink-0 px-5"
           >
             New conversation
           </button>
@@ -191,19 +265,19 @@ export function ChatShell() {
 
       {bannerError ? (
         <div
-          className="border-b border-red-200/80 bg-red-50/95 px-4 py-3 text-center text-sm leading-relaxed text-red-950 sm:px-8"
+          className="border-b border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-center text-sm leading-relaxed text-[color:var(--danger-text)] sm:px-8"
           role="alert"
         >
           {bannerError}
         </div>
       ) : null}
 
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-6 pt-6 sm:px-6">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/80 bg-surface shadow-[var(--card-shadow)]">
-          <div className="border-b border-border/70 bg-background/40 px-4 py-3 sm:px-5">
-            <p className="text-sm font-semibold text-foreground">Conversation</p>
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 pb-6 pt-6 sm:px-6">
+        <div className="ui-card-elevated flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="border-b border-border bg-surface-muted/70 px-4 py-3 sm:px-5">
+            <p className="text-sm font-semibold text-foreground">{CHAT_AGENT_TITLE}</p>
             <p className="mt-0.5 text-xs text-accent-muted">
-              Your messages stay in this session until you start a new conversation.
+              Messages stay in this session until New conversation.
             </p>
           </div>
 
@@ -228,6 +302,25 @@ export function ChatShell() {
                           disabled={loading}
                           onConfirmYes={() => sendUserMessage("yes")}
                           onConfirmNo={() => sendUserMessage("no")}
+                          onSubmitCreateCarrierDraftForm={
+                            submitCreateCarrierDraftForm
+                          }
+                          onSubmitUpdateCarrierCode={submitUpdateCarrierCode}
+                          onSelectUpdateCarrierCategory={
+                            selectUpdateCarrierCategory
+                          }
+                          onSubmitUpdateCarrierSectionForm={
+                            submitUpdateCarrierSectionForm
+                          }
+                          onUpdateCarrierChooseDifferentSection={() =>
+                            navigateUpdateCarrier("back_categories")
+                          }
+                          onBackUpdateCarrierToCode={() =>
+                            navigateUpdateCarrier("back_carrier_code")
+                          }
+                          onBackUpdateCarrierToCategories={() =>
+                            navigateUpdateCarrier("back_categories")
+                          }
                         />
                       ) : null}
                     </div>
@@ -246,18 +339,13 @@ export function ChatShell() {
           <ChatComposer
             onSend={sendUserMessage}
             disabled={loading || !sessionId}
-            placeholder="e.g. I need to add a new carrier, or show me all carriers"
+            placeholder="e.g. new carrier, lookup AB12, list carriers"
           />
         </div>
 
         <p className="mt-4 text-center text-xs leading-relaxed text-accent-muted">
-          <kbd className="rounded-md border border-border bg-surface px-1.5 py-0.5 font-sans text-[11px] text-foreground/80">
-            Enter
-          </kbd>{" "}
-          to send ·{" "}
-          <kbd className="rounded-md border border-border bg-surface px-1.5 py-0.5 font-sans text-[11px] text-foreground/80">
-            Shift+Enter
-          </kbd>{" "}
+          <kbd className="ui-kbd">Enter</kbd> to send ·{" "}
+          <kbd className="ui-kbd">Shift+Enter</kbd>{" "}
           for a new line
         </p>
       </main>

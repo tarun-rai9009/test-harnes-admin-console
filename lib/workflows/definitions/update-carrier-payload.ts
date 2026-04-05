@@ -3,7 +3,23 @@ import {
   UPDATE_CATEGORY_FIELD_KEYS,
   UPDATE_CATEGORY_LABELS,
 } from "@/lib/workflows/definitions/update-carrier-constants";
-import type { UpdateCarrierPayload } from "@/types/zinnia/carriers";
+import type {
+  CarrierDetails,
+  UpdateCarrierPayload,
+} from "@/types/zinnia/carriers";
+
+/** After saving one section, drop its fields so the next category starts clean. */
+export function stripUpdateCategoryKeysFromCollected(
+  data: Record<string, unknown>,
+  categoryId: UpdateCategoryId,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...data };
+  for (const k of UPDATE_CATEGORY_FIELD_KEYS[categoryId]) {
+    delete next[k];
+  }
+  delete next.updateCategory;
+  return next;
+}
 
 function str(data: Record<string, unknown>, key: string): string | undefined {
   const v = data[key];
@@ -19,6 +35,36 @@ function pickDefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
     }
   }
   return out;
+}
+
+/** OpenAPI expects `authorizedJurisdictionStates` as string[]; form collects comma-separated text. */
+function jurisdictionStatesArray(
+  data: Record<string, unknown>,
+): string[] | undefined {
+  const s = str(data, "reg_authorizedJurisdictionStates");
+  if (!s) return undefined;
+  const parts = s
+    .split(/[,;]/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.length ? parts : undefined;
+}
+
+function foundedYearAsNumber(data: Record<string, unknown>): number | undefined {
+  const s = str(data, "reg_foundedYear");
+  if (!s || !/^\d{4}$/.test(s)) return undefined;
+  return parseInt(s, 10);
+}
+
+/** OpenAPI `YnEnum` — Jackson expects "Y" / "N", not booleans. */
+function ynEnumFromCollected(
+  data: Record<string, unknown>,
+  key: string,
+): "Y" | "N" | undefined {
+  const v = data[key];
+  if (typeof v === "boolean") return v ? "Y" : "N";
+  if (v === "Y" || v === "N") return v;
+  return undefined;
 }
 
 /** Human labels for confirmation rows (flat keys → copy). */
@@ -127,34 +173,25 @@ export function collectedParamsToUpdatePayload(
       return { base: { urls } };
     }
     case "identifiers": {
-      const identifiers = pickDefined({
+      const row = pickDefined({
         identifierType: str(data, "id_identifierType"),
         identifierValue: str(data, "id_identifierValue"),
       });
-      if (!Object.keys(identifiers).length) return {};
-      return { base: { identifiers } };
+      if (!Object.keys(row).length) return {};
+      return { base: { identifiers: [row] } };
     }
     case "regulatory": {
       const regulatory = pickDefined({
-        foundedYear: str(data, "reg_foundedYear"),
+        foundedYear: foundedYearAsNumber(data),
         lineOfBusiness: str(data, "reg_lineOfBusiness"),
-        authorizedJurisdictionStates: str(
-          data,
-          "reg_authorizedJurisdictionStates",
-        ),
+        authorizedJurisdictionStates: jurisdictionStatesArray(data),
         rating: str(data, "reg_rating"),
         tpaNonTpa: str(data, "reg_tpaNonTpa"),
-        isC2CRplParticipant:
-          typeof data.reg_isC2CRplParticipant === "boolean"
-            ? data.reg_isC2CRplParticipant
-            : undefined,
-        use1035YP:
-          typeof data.reg_use1035YP === "boolean"
-            ? data.reg_use1035YP
-            : undefined,
+        isC2CRplParticipant: ynEnumFromCollected(data, "reg_isC2CRplParticipant"),
+        use1035YP: ynEnumFromCollected(data, "reg_use1035YP"),
       });
       if (!Object.keys(regulatory).length) return {};
-      return { base: { regulatory } };
+      return { base: { regulatory: [regulatory] } };
     }
     case "business_holidays": {
       const row = pickDefined({
@@ -166,14 +203,14 @@ export function collectedParamsToUpdatePayload(
       return { base: { businessHolidays: [row] } };
     }
     case "hours_operation": {
-      const hoursOfOperation = pickDefined({
+      const row = pickDefined({
         businessHourStart: str(data, "hrs_businessHourStart"),
         businessHourEnd: str(data, "hrs_businessHourEnd"),
         businessDays: str(data, "hrs_businessDays"),
         businessHoursTimeZone: str(data, "hrs_businessHoursTimeZone"),
       });
-      if (!Object.keys(hoursOfOperation).length) return {};
-      return { base: { hoursOfOperation } };
+      if (!Object.keys(row).length) return {};
+      return { base: { hoursOfOperation: [row] } };
     }
     case "connectors": {
       const dtcc = pickDefined({
@@ -291,6 +328,52 @@ export function buildUpdateConfirmationRowsFromData(
       let display: string;
       if (Array.isArray(v)) display = v.join(", ");
       else if (typeof v === "boolean") display = v ? "Yes" : "No";
+      else if (v === "Y" || v === "N") display = v === "Y" ? "Yes" : "No";
+      else display = String(v);
+      rows.push({ label, value: display });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Success card: carrier identity from the API response plus only the section
+ * and field values that were submitted in this update.
+ */
+export function buildUpdateSuccessSummaryCardFields(
+  apiResult: CarrierDetails,
+  submittedData: Record<string, unknown>,
+): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const code = apiResult.carrierCode?.trim() ?? "";
+  const name = apiResult.carrierName?.trim() ?? "";
+  rows.push({
+    label: "Carrier code",
+    value: code ? code.toUpperCase() : "—",
+  });
+  rows.push({ label: "Carrier name", value: name || "—" });
+
+  const cat = submittedData.updateCategory;
+  if (typeof cat === "string" && UPDATE_CATEGORY_LABELS[cat as UpdateCategoryId]) {
+    rows.push({
+      label: "Section updated",
+      value: UPDATE_CATEGORY_LABELS[cat as UpdateCategoryId],
+    });
+  }
+
+  const keys =
+    typeof cat === "string"
+      ? UPDATE_CATEGORY_FIELD_KEYS[cat as UpdateCategoryId]
+      : undefined;
+  if (keys) {
+    for (const key of keys) {
+      if (!isUpdateValueProvided(submittedData[key])) continue;
+      const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
+      const v = submittedData[key];
+      let display: string;
+      if (Array.isArray(v)) display = v.join(", ");
+      else if (typeof v === "boolean") display = v ? "Yes" : "No";
+      else if (v === "Y" || v === "N") display = v === "Y" ? "Yes" : "No";
       else display = String(v);
       rows.push({ label, value: display });
     }

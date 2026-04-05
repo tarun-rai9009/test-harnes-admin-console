@@ -1,5 +1,8 @@
 "use client";
 
+import { CarrierDetailSections } from "@/components/chat/CarrierDetailSections";
+import { CreateCarrierDraftForm } from "@/components/chat/CreateCarrierDraftForm";
+import { UpdateCarrierFlowPanel } from "@/components/chat/UpdateCarrierFlowPanel";
 import type {
   ChatAssistantApiPayload,
   ChatSummaryCard,
@@ -14,9 +17,19 @@ type Props = Pick<
   | "awaitingConfirmation"
   | "responseType"
   | "workflowName"
+  | "workflowId"
+  | "createCarrierDraftForm"
+  | "updateCarrierFlow"
 > & {
   onConfirmYes?: () => void;
   onConfirmNo?: () => void;
+  onSubmitCreateCarrierDraftForm?: (values: Record<string, string>) => void;
+  onSubmitUpdateCarrierCode?: (code: string) => void;
+  onSelectUpdateCarrierCategory?: (categoryId: string) => void;
+  onSubmitUpdateCarrierSectionForm?: (values: Record<string, string>) => void;
+  onUpdateCarrierChooseDifferentSection?: () => void;
+  onBackUpdateCarrierToCode?: () => void;
+  onBackUpdateCarrierToCategories?: () => void;
   disabled?: boolean;
   className?: string;
 };
@@ -30,8 +43,8 @@ function SummaryCardView({
 }) {
   const shell =
     variant === "success"
-      ? "rounded-2xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/90 to-emerald-50/50 px-5 py-4 shadow-[var(--card-shadow)]"
-      : "rounded-2xl border border-border/80 bg-surface px-5 py-4 shadow-[var(--card-shadow)]";
+      ? "rounded-xl border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-5 py-4 shadow-[var(--card-shadow-sm)]"
+      : "ui-card";
 
   const hasLines = Boolean(card.lines?.length);
   const hasFields = Boolean(card.fields?.length);
@@ -84,7 +97,7 @@ function SummaryCardView({
         >
           <table className="w-full min-w-[260px] border-collapse text-left text-sm">
             <thead>
-              <tr className="border-b border-border bg-background/80">
+              <tr className="border-b border-border bg-surface-muted">
                 {card.table.columns.map((col) => (
                   <th
                     key={col.id}
@@ -99,7 +112,7 @@ function SummaryCardView({
               {card.table.rows.map((row, ri) => (
                 <tr
                   key={ri}
-                  className="border-b border-border/50 last:border-0 odd:bg-background/40"
+                  className="border-b border-border/80 last:border-0 odd:bg-surface-muted/50"
                 >
                   {card.table!.columns.map((col) => (
                     <td
@@ -123,14 +136,124 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+const MAX_NEST_DEPTH = 14;
+
+function LeafText({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <>—</>;
+  if (typeof value === "boolean") return <>{value ? "Yes" : "No"}</>;
+  if (typeof value === "number") return <>{value}</>;
+  if (typeof value === "string") {
+    const t = value.trim();
+    return (
+      <span className="whitespace-pre-wrap break-words">{t.length ? value : "—"}</span>
+    );
+  }
+  return <span className="break-all">{String(value)}</span>;
+}
+
+function ObjectFieldsView({
+  data,
+  depth,
+}: {
+  data: Record<string, unknown>;
+  depth: number;
+}) {
+  const entries = Object.entries(data).filter(
+    ([k]) => k !== "mock" && !k.startsWith("_"),
+  );
+  if (entries.length === 0) return null;
+  return (
+    <dl className="space-y-3">
+      {entries.map(([key, val]) => (
+        <div
+          key={key}
+          className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,32%)_1fr] sm:gap-3"
+        >
+          <dt className="text-sm font-medium text-accent-muted">
+            {labelForFieldKey(key)}
+          </dt>
+          <dd className="min-w-0 text-sm leading-relaxed text-foreground">
+            <NestedResultValue value={val} depth={depth} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function NestedResultValue({
+  value,
+  depth,
+}: {
+  value: unknown;
+  depth: number;
+}) {
+  if (depth > MAX_NEST_DEPTH) {
+    return <span className="italic text-accent-muted">…</span>;
+  }
+  if (value === null || value === undefined) return <>—</>;
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <>—</>;
+    const first = value[0];
+    if (isPlainObject(first)) {
+      return (
+        <div className="mt-0.5 space-y-3">
+          {value.map((item, i) =>
+            isPlainObject(item) ? (
+              <div
+                key={i}
+                className="rounded-lg border border-border bg-surface-muted/90 p-3"
+              >
+                <ObjectFieldsView data={item} depth={depth + 1} />
+              </div>
+            ) : (
+              <div key={i} className="text-sm">
+                <NestedResultValue value={item} depth={depth + 1} />
+              </div>
+            ),
+          )}
+        </div>
+      );
+    }
+    return (
+      <span className="break-words text-foreground/90">
+        {value.map((x, i) => (
+          <span key={i}>
+            {i > 0 ? ", " : null}
+            <NestedResultValue value={x} depth={depth + 1} />
+          </span>
+        ))}
+      </span>
+    );
+  }
+
+  if (isPlainObject(value)) {
+    return (
+      <div className="mt-1 border-l-2 border-accent/30 pl-3">
+        <ObjectFieldsView data={value} depth={depth + 1} />
+      </div>
+    );
+  }
+
+  return <LeafText value={value} />;
+}
+
+function formatCell(val: unknown): string {
+  if (val === null || val === undefined) return "—";
+  if (Array.isArray(val)) return val.map(String).join(", ");
+  if (isPlainObject(val)) return JSON.stringify(val);
+  return String(val);
+}
+
 function ResultDataView({ data }: { data: unknown }) {
   if (data === null || data === undefined) return null;
 
   if (Array.isArray(data)) {
     if (data.length === 0) {
       return (
-        <p className="rounded-xl border border-dashed border-border/90 bg-background/80 px-4 py-3 text-sm text-accent-muted">
-          Nothing to show in this list yet.
+        <p className="rounded-lg border border-dashed border-border bg-surface-muted/90 px-4 py-3 text-sm text-accent-muted">
+          No rows.
         </p>
       );
     }
@@ -138,7 +261,7 @@ function ResultDataView({ data }: { data: unknown }) {
     if (isPlainObject(first)) {
       const columns = Object.keys(first).filter((k) => !k.startsWith("_"));
       return (
-        <div className="overflow-x-auto rounded-xl border border-border bg-surface shadow-sm">
+        <div className="overflow-x-auto rounded-lg border border-border bg-surface shadow-[var(--card-shadow-sm)]">
           <table className="w-full min-w-[280px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-border bg-background">
@@ -170,7 +293,7 @@ function ResultDataView({ data }: { data: unknown }) {
       );
     }
     return (
-      <ul className="list-inside list-disc space-y-1 rounded-xl border border-border bg-surface px-4 py-3 text-sm">
+      <ul className="list-inside list-disc space-y-1 rounded-lg border border-border bg-surface px-4 py-3 text-sm shadow-[var(--card-shadow-sm)]">
         {data.map((item, i) => (
           <li key={i}>{String(item)}</li>
         ))}
@@ -184,36 +307,17 @@ function ResultDataView({ data }: { data: unknown }) {
     );
     if (entries.length === 0) return null;
     return (
-      <div className="overflow-x-auto rounded-xl border border-border bg-surface shadow-sm">
-        <dl className="divide-y divide-border">
-          {entries.map(([key, val]) => (
-            <div
-              key={key}
-              className="grid grid-cols-1 gap-1 px-4 py-2.5 sm:grid-cols-[minmax(0,34%)_1fr] sm:gap-4"
-            >
-              <dt className="text-sm font-medium text-accent-muted">
-                {labelForFieldKey(key)}
-              </dt>
-              <dd className="text-sm text-foreground">{formatCell(val)}</dd>
-            </div>
-          ))}
-        </dl>
+      <div className="overflow-x-auto rounded-lg border border-border bg-surface p-4 shadow-[var(--card-shadow-sm)]">
+        <ObjectFieldsView data={data} depth={0} />
       </div>
     );
   }
 
   return (
-    <p className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-      {String(data)}
+    <p className="rounded-lg border border-border bg-surface px-3 py-2 text-sm shadow-[var(--card-shadow-sm)]">
+      <LeafText value={data} />
     </p>
   );
-}
-
-function formatCell(val: unknown): string {
-  if (val === null || val === undefined) return "—";
-  if (Array.isArray(val)) return val.map(String).join(", ");
-  if (isPlainObject(val)) return JSON.stringify(val);
-  return String(val);
 }
 
 export function StructuredPanel({
@@ -223,8 +327,18 @@ export function StructuredPanel({
   awaitingConfirmation,
   responseType,
   workflowName,
+  workflowId,
+  createCarrierDraftForm,
+  updateCarrierFlow,
   onConfirmYes,
   onConfirmNo,
+  onSubmitCreateCarrierDraftForm,
+  onSubmitUpdateCarrierCode,
+  onSelectUpdateCarrierCategory,
+  onSubmitUpdateCarrierSectionForm,
+  onUpdateCarrierChooseDifferentSection,
+  onBackUpdateCarrierToCode,
+  onBackUpdateCarrierToCategories,
   disabled,
   className = "",
 }: Props) {
@@ -239,7 +353,7 @@ export function StructuredPanel({
     >
       {workflowName ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-accent-muted">Working on</span>
+          <span className="text-xs font-medium text-accent-muted">Task</span>
           <span className="inline-flex rounded-full border border-border/80 bg-background px-2.5 py-0.5 text-xs font-medium text-foreground">
             {workflowName}
           </span>
@@ -256,25 +370,54 @@ export function StructuredPanel({
           variant={
             responseType === "success" &&
             (Boolean(summaryCard.fields?.length) ||
-              Boolean(summaryCard.table?.rows?.length))
+              Boolean(summaryCard.table?.rows?.length) ||
+              Boolean(summaryCard.lines?.length))
               ? "success"
               : "default"
           }
         />
       ) : null}
 
+      {createCarrierDraftForm &&
+      onSubmitCreateCarrierDraftForm &&
+      createCarrierDraftForm.fields.length > 0 ? (
+        <CreateCarrierDraftForm
+          form={createCarrierDraftForm}
+          disabled={disabled}
+          onSubmit={onSubmitCreateCarrierDraftForm}
+        />
+      ) : null}
+
+      {updateCarrierFlow &&
+      onSubmitUpdateCarrierCode &&
+      onSelectUpdateCarrierCategory &&
+      onSubmitUpdateCarrierSectionForm ? (
+        <UpdateCarrierFlowPanel
+          flow={updateCarrierFlow}
+          disabled={disabled}
+          onSubmitCarrierCode={onSubmitUpdateCarrierCode}
+          onSelectCategory={onSelectUpdateCarrierCategory}
+          onSubmitSectionForm={onSubmitUpdateCarrierSectionForm}
+          onBackToCarrierCode={onBackUpdateCarrierToCode}
+          onBackToCategories={onBackUpdateCarrierToCategories}
+        />
+      ) : null}
+
       {missingFields && missingFields.length > 0 ? (
-        <div className="rounded-2xl border border-amber-200/80 bg-amber-50/80 px-5 py-4 shadow-[var(--card-shadow)]">
-          <p className="text-sm font-semibold text-amber-950">
-            A few details still needed
+        <div className="ui-alert-warning">
+          <p className="text-sm font-semibold text-[color:var(--warning-text)]">
+            Still needed
           </p>
-          <p className="mt-1 text-sm text-amber-900/85">
-            When you’re ready, share the following so we can continue.
+          <p className="mt-1 text-sm text-[color:var(--warning-text)]/90">
+            Provide:
           </p>
-          <ul className="mt-3 space-y-2 text-sm text-amber-950/90">
+          <ul className="mt-3 space-y-2 text-sm text-[color:var(--warning-text)]">
             {missingFields.map((key) => (
               <li key={key} className="flex items-start gap-2.5">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500/80" aria-hidden />
+                <span
+                  className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--warning-icon)]"
+                  aria-hidden
+                />
                 <span>{labelForFieldKey(key)}</span>
               </li>
             ))}
@@ -283,37 +426,75 @@ export function StructuredPanel({
       ) : null}
 
       {awaitingConfirmation && responseType === "confirm" ? (
-        <div className="rounded-2xl border border-accent/20 bg-accent/[0.06] px-5 py-4 shadow-[var(--card-shadow)]">
+        <div className="rounded-xl border border-[color:var(--info-border)] bg-[color:var(--info-bg)] px-5 py-4 shadow-[var(--card-shadow-sm)]">
           <p className="text-[15px] font-semibold text-foreground">
-            Ready to save?
+            {workflowId === "update_carrier"
+              ? "Apply this section?"
+              : "Ready to save?"}
           </p>
           <p className="mt-1.5 text-sm leading-relaxed text-accent-muted">
-            Please double-check the summary. If you confirm, we’ll save this to your carrier records.
+            {workflowId === "update_carrier"
+              ? "Confirm to send this section. You can update more after."
+              : "Confirm to save."}
           </p>
+          {workflowId === "update_carrier" &&
+          onUpdateCarrierChooseDifferentSection ? (
+            <div className="mt-4">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={onUpdateCarrierChooseDifferentSection}
+                className="ui-btn-ghost disabled:opacity-50"
+              >
+                Choose a different section
+              </button>
+            </div>
+          ) : null}
           <div className="mt-5 flex flex-wrap gap-2.5">
             <button
               type="button"
               disabled={disabled}
               onClick={onConfirmYes}
-              className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="ui-btn-primary"
             >
-              Yes, save it
+              Yes
             </button>
             <button
               type="button"
               disabled={disabled}
               onClick={onConfirmNo}
-              className="rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-background disabled:cursor-not-allowed disabled:opacity-50"
+              className="ui-btn-secondary"
             >
-              Not yet
+              {workflowId === "update_carrier"
+                ? "Edit form again"
+                : "Not yet"}
             </button>
           </div>
         </div>
       ) : null}
 
       {showResult ? (
-        <div className="rounded-2xl border border-dashed border-border/90 bg-background/60 p-3">
-          <ResultDataView data={resultData} />
+        <div className="rounded-xl border border-dashed border-border bg-surface-muted/80 p-3">
+          {workflowName === "Carrier lookup" ? (
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-accent-muted">
+              Full record
+            </p>
+          ) : null}
+          {workflowName === "New carrier setup" ? (
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-accent-muted">
+              Saved draft (full response)
+            </p>
+          ) : null}
+          {workflowName === "Carrier update" ? (
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-accent-muted">
+              Updated carrier (full response)
+            </p>
+          ) : null}
+          {workflowId === "find_carrier" ? (
+            <CarrierDetailSections data={resultData} />
+          ) : (
+            <ResultDataView data={resultData} />
+          )}
         </div>
       ) : null}
     </div>

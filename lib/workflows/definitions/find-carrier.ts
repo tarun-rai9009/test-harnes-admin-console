@@ -1,6 +1,6 @@
 import { getCarrierByCode } from "@/lib/zinnia/carriers";
 import type { CarrierDetails } from "@/types/zinnia/carriers";
-import { carrierDetailsToSummaryFields } from "@/lib/workflows/carrier-summary-fields";
+import { carrierLookupBriefSummaryFields } from "@/lib/workflows/carrier-summary-fields";
 import type { WorkflowDefinition } from "@/lib/workflows/workflow-types";
 import { validateCarrierCode } from "@/lib/workflows/validators";
 
@@ -12,12 +12,10 @@ function formatFindSuccess(result: unknown): {
   const d = result as CarrierDetails;
   const name = d.carrierName?.trim() || "this carrier";
   const code = d.carrierCode?.trim() || "";
-  const headline = code
-    ? `Here’s what we have on file for ${name} (carrier code ${code}).`
-    : `Here’s what we have on file for ${name}.`;
+  const headline = code ? `${name} (${code}).` : `${name}.`;
   return {
     message: headline,
-    summaryFields: carrierDetailsToSummaryFields(d),
+    summaryFields: carrierLookupBriefSummaryFields(d),
   };
 }
 
@@ -30,8 +28,7 @@ export const findCarrierWorkflow: WorkflowDefinition = {
       key: "carrierCode",
       required: true,
       summaryLabel: "Carrier Code",
-      businessPrompt:
-        "Which carrier code should I look up? You can type the code your team normally uses.",
+      businessPrompt: "Which carrier code? (4 characters)",
       validate: validateCarrierCode,
     },
   ],

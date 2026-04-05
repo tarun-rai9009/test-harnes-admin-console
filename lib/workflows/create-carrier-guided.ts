@@ -1,6 +1,7 @@
 /** Guided copy for the create-carrier conversation (orchestrator only). */
 
-export const CREATE_CARRIER_FIELD_COUNT = 9;
+/** OpenAPI-required fields only (optional details are asked separately). */
+export const CREATE_CARRIER_FIELD_COUNT = 4;
 
 /**
  * Warm, step-by-step framing before the next question.
@@ -22,14 +23,13 @@ export function buildCreateCarrierCollectingMessage(parts: {
 
   let bridge: string;
   if (filled === 0) {
-    bridge =
-      "I’ll walk you through setting up a new carrier. We’ll take it one question at a time — or you can paste several answers at once if you already have them handy.";
+    bridge = "New carrier setup — answer below (or paste several at once).";
   } else if (missingCount === 1) {
-    bridge = `Almost there${stepLabel}. One last question:`;
+    bridge = `Almost there${stepLabel}. Last question:`;
   } else if (missingCount <= 3) {
-    bridge = `Nice progress${stepLabel}. A few more questions:`;
+    bridge = `Good progress${stepLabel}. Next:`;
   } else {
-    bridge = `Got it${stepLabel}. Here’s the next thing I need:`;
+    bridge = `Next${stepLabel}:`;
   }
 
   return [preamble, bridge, fieldPrompt, followUp].filter(Boolean).join("\n\n");

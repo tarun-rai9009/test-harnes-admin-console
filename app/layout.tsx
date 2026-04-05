@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { CHAT_AGENT_TITLE } from "@/lib/branding";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Carrier operations assistant",
+  title: CHAT_AGENT_TITLE,
   description:
-    "Guided internal assistant for carrier setup, lookups, lists, and updates.",
+    "Admin console chat for carrier setup, lookups, lists, reference data, and updates.",
 };
 
 export default function RootLayout({
