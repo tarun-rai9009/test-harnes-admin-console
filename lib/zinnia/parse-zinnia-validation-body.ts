@@ -24,7 +24,7 @@ function firstStringMessage(v: unknown): string | undefined {
   }
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
-    for (const k of ["message", "detail", "description", "msg", "error"]) {
+    for (const k of ["issue", "message", "detail", "description", "msg", "error"]) {
       const m = firstStringMessage(o[k]);
       if (m) return m;
     }
@@ -32,9 +32,28 @@ function firstStringMessage(v: unknown): string | undefined {
   return undefined;
 }
 
+export type ZinniaErrorParseOptions = {
+  /** Map API `field` paths (e.g. base.regulatory[0].rating) onto allowed form keys. */
+  resolveAllowedKey?: (apiFieldPath: string) => string | undefined;
+};
+
+function validationIssueStrings(root: unknown): string[] {
+  if (!root || typeof root !== "object") return [];
+  const errs = (root as Record<string, unknown>).errors;
+  if (!Array.isArray(errs)) return [];
+  const out: string[] = [];
+  for (const item of errs) {
+    if (!item || typeof item !== "object") continue;
+    const issue = (item as Record<string, unknown>).issue;
+    if (typeof issue === "string" && issue.trim()) out.push(issue.trim());
+  }
+  return out;
+}
+
 export function parseZinniaErrorBodyForAllowedKeys(
   bodyText: string,
   allowed: Set<string>,
+  options?: ZinniaErrorParseOptions,
 ): { fieldErrors: Record<string, string>; formLevelMessage?: string } {
   const fieldErrors: Record<string, string> = {};
   const trimmed = bodyText.trim();
@@ -50,9 +69,15 @@ export function parseZinniaErrorBodyForAllowedKeys(
   const root = tryParse();
   const visited = new WeakSet<object>();
 
-  const assignField = (key: string, message: string) => {
-    const k = leafKey(key);
-    if (!allowed.has(k)) return;
+  const resolveAllowedKey = options?.resolveAllowedKey;
+
+  const assignField = (apiPath: string, message: string) => {
+    const mapped = resolveAllowedKey?.(apiPath);
+    const candidates = [mapped, leafKey(apiPath)].filter(
+      (x): x is string => typeof x === "string" && x.length > 0,
+    );
+    const k = candidates.find((c) => allowed.has(c));
+    if (!k) return;
     if (!fieldErrors[k]) fieldErrors[k] = message;
   };
 
@@ -78,6 +103,7 @@ export function parseZinniaErrorBodyForAllowedKeys(
                   ? leafKey(o.path)
                   : undefined;
           const msg =
+            firstStringMessage(o.issue) ??
             firstStringMessage(o.message) ??
             firstStringMessage(o.detail) ??
             firstStringMessage(o.defaultMessage);
@@ -94,6 +120,7 @@ export function parseZinniaErrorBodyForAllowedKeys(
     for (const [k, v] of Object.entries(obj)) {
       if (k === "field" && typeof v === "string") {
         const msg =
+          firstStringMessage(obj.issue) ??
           firstStringMessage(obj.message) ??
           firstStringMessage(obj.detail) ??
           firstStringMessage(obj.title);
@@ -134,11 +161,25 @@ export function parseZinniaErrorBodyForAllowedKeys(
 
   if (Object.keys(fieldErrors).length === 0 && root && typeof root === "object") {
     const o = root as Record<string, unknown>;
-    formLevelMessage =
+    const issues = validationIssueStrings(root);
+    const joined =
+      issues.length === 0
+        ? undefined
+        : issues.length === 1
+          ? issues[0]
+          : issues.slice(0, 5).join(" · ");
+    const top =
       firstStringMessage(o.detail) ??
       firstStringMessage(o.message) ??
       firstStringMessage(o.error) ??
       firstStringMessage(o.title);
+    const genericTop =
+      typeof top === "string" &&
+      /^request contains invalid fields$/i.test(top.trim());
+    formLevelMessage =
+      joined ??
+      (genericTop ? undefined : top) ??
+      top;
   }
 
   if (!formLevelMessage && Object.keys(fieldErrors).length === 0 && trimmed) {
@@ -152,5 +193,27 @@ export function parseZinniaErrorBodyForAllowedKeys(
     }
   }
 
+  const issuesList =
+    root !== null && typeof root === "object"
+      ? validationIssueStrings(root)
+      : [];
+  if (issuesList.length > 0 && !formLevelMessage) {
+    formLevelMessage =
+      issuesList.length === 1
+        ? issuesList[0]!
+        : issuesList.slice(0, 4).join(" · ");
+  }
+
   return { fieldErrors, formLevelMessage };
+}
+
+/** Top-level `errors[].issue` strings from a Zinnia ValidationErrorResponse body. */
+export function extractZinniaValidationIssuesFromBody(bodyText: string): string[] {
+  const trimmed = bodyText.trim();
+  if (!trimmed) return [];
+  try {
+    return validationIssueStrings(JSON.parse(trimmed) as unknown);
+  } catch {
+    return [];
+  }
 }

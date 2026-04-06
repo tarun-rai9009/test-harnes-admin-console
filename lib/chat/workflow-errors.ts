@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { WorkflowDefinition } from "@/lib/workflows/workflow-types";
+import { extractZinniaValidationIssuesFromBody } from "@/lib/zinnia/parse-zinnia-validation-body";
 import { ZinniaApiError, ZinniaAuthError } from "@/lib/zinnia/types";
 
 /** Maps common API field paths/keys to calm, business-facing phrases. */
@@ -196,6 +197,14 @@ export function logWorkflowErrorServerSide(
 }
 
 function messageForCreateValidation(e: ZinniaApiError): string {
+  const issues = extractZinniaValidationIssuesFromBody(e.bodyText);
+  if (issues.length === 1) {
+    return `${issues[0]} Please adjust and try again.`;
+  }
+  if (issues.length > 1) {
+    return `${issues.slice(0, 4).join(" · ")} Please adjust and try again.`;
+  }
+
   const keys = parseProblemFieldKeys(e.bodyText);
   const phrases = keys.length
     ? [...new Set(keys.map(labelForFieldKey))]
@@ -218,6 +227,14 @@ function messageForCreateValidation(e: ZinniaApiError): string {
 }
 
 function messageForUpdateValidation(e: ZinniaApiError): string {
+  const issues = extractZinniaValidationIssuesFromBody(e.bodyText);
+  if (issues.length === 1) {
+    return `${issues[0]} Please adjust and try again.`;
+  }
+  if (issues.length > 1) {
+    return `${issues.slice(0, 4).join(" · ")} Please adjust and try again.`;
+  }
+
   const keys = parseProblemFieldKeys(e.bodyText);
   const phrases = keys.length
     ? [...new Set(keys.map(labelForFieldKey))]
@@ -306,6 +323,10 @@ function messageForZinniaApi(
   }
 
   if (path === "/carriers" && method === "GET") {
+    const list = extractZinniaValidationIssuesFromBody(e.bodyText);
+    if (list.length) {
+      return `Couldn’t load carriers: ${list.slice(0, 4).join(" · ")}`;
+    }
     return "Couldn’t load carriers. Try again.";
   }
 
@@ -324,6 +345,13 @@ function messageForZinniaApi(
   if (method === "GET" && isSingleCarrierPath(path)) {
     if (status >= 500) {
       return "Lookup failed. Try again.";
+    }
+    if (status === 400 || status === 422) {
+      const list = extractZinniaValidationIssuesFromBody(e.bodyText);
+      if (list.length) {
+        return `Couldn’t load carrier details: ${list.slice(0, 4).join(" · ")}`;
+      }
+      return "Couldn’t load carrier details. Try again.";
     }
     return messageForFindNotFound(e, collected);
   }

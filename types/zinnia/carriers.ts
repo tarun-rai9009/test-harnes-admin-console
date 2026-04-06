@@ -107,7 +107,8 @@ export type UpdateCarrierBaseSection = {
   logoAssetReference?: string;
   lineOfBusiness?: string;
   productTypes?: string[];
-  urls?: UpdateCarrierBaseUrls;
+  /** OpenAPI: array of URL rows on CarrierBase */
+  urls?: UpdateCarrierBaseUrls[];
   /** OpenAPI: array of identifier rows on CarrierBase */
   identifiers?: UpdateCarrierBaseIdentifiers[];
   /** OpenAPI: array of regulatory rows on CarrierBase */

@@ -163,14 +163,14 @@ export function collectedParamsToUpdatePayload(
       return Object.keys(base).length ? { base } : {};
     }
     case "urls": {
-      const urls = pickDefined({
+      const row = pickDefined({
         organizationDomainName: str(data, "url_organizationDomainName"),
         carrierLoginUrl: str(data, "url_carrierLoginUrl"),
         agentLoginUrl: str(data, "url_agentLoginUrl"),
         customerLoginUrl: str(data, "url_customerLoginUrl"),
       });
-      if (!Object.keys(urls).length) return {};
-      return { base: { urls } };
+      if (!Object.keys(row).length) return {};
+      return { base: { urls: [row] } };
     }
     case "identifiers": {
       const row = pickDefined({
