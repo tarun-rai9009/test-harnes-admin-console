@@ -95,5 +95,7 @@ export type WorkflowDefinition = {
       columns: { id: string; label: string }[];
       rows: Record<string, string>[];
     };
+    /** Action buttons to show after success */
+    actions?: { label: string; message: string }[];
   };
 };

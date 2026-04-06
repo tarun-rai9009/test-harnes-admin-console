@@ -135,6 +135,7 @@ export function formatSuccessResponse(
     columns: { id: string; label: string }[];
     rows: Record<string, string>[];
   };
+  actions?: { label: string; message: string }[];
 } {
   return definition.formatSuccess(result);
 }

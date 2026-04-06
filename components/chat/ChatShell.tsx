@@ -77,6 +77,7 @@ export function ChatShell() {
     createCarrierDraftForm?: Record<string, unknown>;
     updateCarrierCode?: string;
     updateCarrierCategoryId?: string;
+    updateCarrierCategoryIds?: string[];
     updateCarrierSectionForm?: Record<string, string>;
     updateCarrierNavigate?: "back_carrier_code" | "back_categories";
   };
@@ -101,6 +102,10 @@ export function ChatShell() {
               : {}),
             ...(extras?.updateCarrierCategoryId != null
               ? { updateCarrierCategoryId: extras.updateCarrierCategoryId }
+              : {}),
+            ...(extras?.updateCarrierCategoryIds != null &&
+            extras.updateCarrierCategoryIds.length > 0
+              ? { updateCarrierCategoryIds: extras.updateCarrierCategoryIds }
               : {}),
             ...(extras?.updateCarrierSectionForm != null
               ? { updateCarrierSectionForm: extras.updateCarrierSectionForm }
@@ -213,6 +218,13 @@ export function ChatShell() {
     [callChat],
   );
 
+  const submitSelectedUpdateCarrierCategories = useCallback(
+    (categoryIds: string[]) => {
+      void callChat("", { updateCarrierCategoryIds: categoryIds });
+    },
+    [callChat],
+  );
+
   const submitUpdateCarrierSectionForm = useCallback(
     (values: Record<string, string>) => {
       void callChat("", { updateCarrierSectionForm: values });
@@ -297,7 +309,7 @@ export function ChatShell() {
                       />
                       {i === lastAssistantIndex && structured ? (
                         <StructuredPanel
-                          className="mt-3"
+                          className={m.content.trim() ? "mt-3" : "mt-0"}
                           {...structured}
                           disabled={loading}
                           onConfirmYes={() => sendUserMessage("yes")}
@@ -308,6 +320,9 @@ export function ChatShell() {
                           onSubmitUpdateCarrierCode={submitUpdateCarrierCode}
                           onSelectUpdateCarrierCategory={
                             selectUpdateCarrierCategory
+                          }
+                          onSubmitSelectedUpdateCarrierCategories={
+                            submitSelectedUpdateCarrierCategories
                           }
                           onSubmitUpdateCarrierSectionForm={
                             submitUpdateCarrierSectionForm
@@ -321,6 +336,7 @@ export function ChatShell() {
                           onBackUpdateCarrierToCategories={() =>
                             navigateUpdateCarrier("back_categories")
                           }
+                          onActionClick={sendUserMessage}
                         />
                       ) : null}
                     </div>

@@ -9,7 +9,7 @@ import {
   validateAndMergeUpdateCarrierSection,
 } from "@/lib/workflows/update-carrier-section-form";
 import type { UpdateCategoryId } from "@/lib/workflows/definitions/update-carrier-constants";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Props = {
   form: UpdateCarrierSectionFormState;
@@ -17,6 +17,13 @@ type Props = {
   categoryId: UpdateCategoryId;
   disabled?: boolean;
   onSubmit: (values: Record<string, string>) => void;
+  /** When true, no submit button (parent collects one merged submit). */
+  hideSubmit?: boolean;
+  onValuesChange?: (values: Record<string, string>) => void;
+  /** Overrides default "Update section" panel title. */
+  sectionTitle?: string;
+  /** Prefix for input ids (defaults to `upd`). */
+  idPrefix?: string;
 };
 
 export function UpdateCarrierSectionForm({
@@ -25,6 +32,10 @@ export function UpdateCarrierSectionForm({
   categoryId,
   disabled,
   onSubmit,
+  hideSubmit,
+  onValuesChange,
+  sectionTitle,
+  idPrefix = "upd",
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>(form.values);
   const [clientFieldErrors, setClientFieldErrors] = useState<
@@ -32,9 +43,17 @@ export function UpdateCarrierSectionForm({
   >({});
   const [clientFormLevel, setClientFormLevel] = useState("");
 
+  /** Avoid [onValuesChange] in deps — parent often passes an inline fn and would loop: effect → setState → new fn → effect. */
+  const onValuesChangeRef = useRef(onValuesChange);
+  onValuesChangeRef.current = onValuesChange;
+
   useEffect(() => {
     setValues(form.values);
   }, [form.values]);
+
+  useEffect(() => {
+    onValuesChangeRef.current?.(values);
+  }, [values]);
 
   useEffect(() => {
     setClientFieldErrors({});
@@ -59,31 +78,33 @@ export function UpdateCarrierSectionForm({
   const hasValidationErrors =
     hasAnyFieldError || Boolean(formLevelError.trim());
 
-  return (
-    <form className="ui-panel"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (disabled) return;
-        const base = {
-          carrierCode,
-          updateCategory: categoryId,
-        };
-        const result = validateAndMergeUpdateCarrierSection(
-          base,
-          categoryId,
-          values,
-        );
-        if (!result.ok) {
-          setClientFieldErrors(result.errors);
-          setClientFormLevel(result.formLevelError ?? "");
-          return;
-        }
-        setClientFieldErrors({});
-        setClientFormLevel("");
-        onSubmit(values);
-      }}
-    >
-      <p className="ui-panel-title">Update section</p>
+  const runSubmit = () => {
+    if (disabled) return;
+    const base = {
+      carrierCode,
+      updateCategory: categoryId,
+    };
+    const result = validateAndMergeUpdateCarrierSection(
+      base,
+      categoryId,
+      values,
+    );
+    if (!result.ok) {
+      setClientFieldErrors(result.errors);
+      setClientFormLevel(result.formLevelError ?? "");
+      return;
+    }
+    setClientFieldErrors({});
+    setClientFormLevel("");
+    onSubmit(values);
+  };
+
+  const panelClass = "ui-panel";
+  const title = sectionTitle ?? "Update section";
+
+  const inner = (
+    <>
+      <p className="ui-panel-title">{title}</p>
       <p className="ui-panel-desc">
         {hasValidationErrors
           ? "Fix highlighted fields, then submit again."
@@ -104,7 +125,7 @@ export function UpdateCarrierSectionForm({
             <div key={f.key}>
               <div className="flex flex-wrap items-center gap-2">
                 <label
-                  htmlFor={`upd-${f.key}`}
+                  htmlFor={`${idPrefix}-${f.key}`}
                   className="text-sm font-medium text-foreground"
                 >
                   {f.label}
@@ -118,18 +139,18 @@ export function UpdateCarrierSectionForm({
               {carrierFieldUsesEnumControl(f) ? (
                 <CarrierFormEnumControl
                   field={f}
-                  idPrefix="upd"
+                  idPrefix={idPrefix}
                   value={values[f.key] ?? ""}
                   onChange={(v) => setField(f.key, v)}
                   disabled={disabled}
                   invalid={invalid}
                   errorDescribedBy={
-                    invalid ? `upd-err-${f.key}` : undefined
+                    invalid ? `${idPrefix}-err-${f.key}` : undefined
                   }
                 />
               ) : f.multiline ? (
                 <textarea
-                  id={`upd-${f.key}`}
+                  id={`${idPrefix}-${f.key}`}
                   name={f.key}
                   rows={3}
                   disabled={disabled}
@@ -137,11 +158,13 @@ export function UpdateCarrierSectionForm({
                   onChange={(e) => setField(f.key, e.target.value)}
                   className={`${baseInput} ${border} ui-textarea`}
                   aria-invalid={invalid}
-                  aria-describedby={invalid ? `upd-err-${f.key}` : undefined}
+                  aria-describedby={
+                    invalid ? `${idPrefix}-err-${f.key}` : undefined
+                  }
                 />
               ) : (
                 <input
-                  id={`upd-${f.key}`}
+                  id={`${idPrefix}-${f.key}`}
                   name={f.key}
                   type="text"
                   disabled={disabled}
@@ -149,12 +172,14 @@ export function UpdateCarrierSectionForm({
                   onChange={(e) => setField(f.key, e.target.value)}
                   className={`${baseInput} ${border}`}
                   aria-invalid={invalid}
-                  aria-describedby={invalid ? `upd-err-${f.key}` : undefined}
+                  aria-describedby={
+                    invalid ? `${idPrefix}-err-${f.key}` : undefined
+                  }
                 />
               )}
               {err ? (
                 <p
-                  id={`upd-err-${f.key}`}
+                  id={`${idPrefix}-err-${f.key}`}
                   className="mt-1.5 text-sm font-medium text-[color:var(--danger-text)]"
                   role="alert"
                 >
@@ -165,11 +190,33 @@ export function UpdateCarrierSectionForm({
           );
         })}
       </div>
-      <div className="mt-5">
-        <button type="submit" disabled={disabled} className="ui-btn-primary">
-          {hasValidationErrors ? "Submit corrections" : "Save updates"}
-        </button>
+      {!hideSubmit ? (
+        <div className="mt-5">
+          <button type="submit" disabled={disabled} className="ui-btn-primary">
+            {hasValidationErrors ? "Submit corrections" : "Save updates"}
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+
+  if (hideSubmit) {
+    return (
+      <div className={panelClass} role="group" aria-label={title}>
+        {inner}
       </div>
+    );
+  }
+
+  return (
+    <form
+      className={panelClass}
+      onSubmit={(e) => {
+        e.preventDefault();
+        runSubmit();
+      }}
+    >
+      {inner}
     </form>
   );
 }

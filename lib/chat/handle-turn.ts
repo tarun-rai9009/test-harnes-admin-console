@@ -49,6 +49,7 @@ import {
   buildUpdateSectionFormStateFromStrings,
   isUpdateCategoryId,
   listUpdateCarrierCategories,
+  sliceUpdateSectionValuesFromFlat,
   stringValuesForUpdateSection,
   validateAndMergeUpdateCarrierSection,
 } from "@/lib/workflows/update-carrier-section-form";
@@ -56,6 +57,7 @@ import { validateCarrierCode } from "@/lib/workflows/validators";
 import type { WorkflowDefinition } from "@/lib/workflows/workflow-types";
 import {
   buildUpdateSuccessSummaryCardFields,
+  stripMultiCategoryKeysFromCollected,
   stripUpdateCategoryKeysFromCollected,
 } from "@/lib/workflows/definitions/update-carrier-payload";
 import { validateCollectedParamsBeforeExecute } from "@/lib/workflows/validate-collected";
@@ -100,6 +102,27 @@ const WORKFLOW_RESET = {
   updateCarrierUiPhase: "none" as const,
 };
 
+const MAIN_MENU_ACTIONS: { label: string; message: string }[] = [
+  { label: "Create new carrier", message: "New carrier" },
+  { label: "Lookup Carrier by carrierCode", message: "Lookup by code" },
+  { label: "Check all carriers", message: "List carriers" },
+  { label: "Update the carrier", message: "Update carrier" },
+];
+
+function wantsMainMenu(text: string): boolean {
+  return /^next$/i.test(text.trim());
+}
+
+function buildMainMenuAssistantReply(): {
+  message: string;
+  summaryCard: ChatSummaryCard;
+} {
+  return {
+    message: "",
+    summaryCard: { actions: MAIN_MENU_ACTIONS },
+  };
+}
+
 function extractedToRecord(fields: ExtractedFields): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {
@@ -130,17 +153,43 @@ function wantsReset(text: string): boolean {
 
 /** When the model did not classify intent, try a few business phrases. */
 function heuristicWorkflowId(text: string): string | null {
-  const t = text.toLowerCase();
+  const t = text.toLowerCase().trim();
   if (
     /\b(update|change|edit|modify)\b[\s\S]{0,40}\bcarrier\b/.test(t) ||
     /\bcarrier\b[\s\S]{0,40}\b(update|change)\b/.test(t)
   ) {
     return "update_carrier";
   }
-  if (textSuggestsCreateCarrierDraft(text)) {
+  if (
+    /^new\s+carrier$/i.test(text.trim()) ||
+    /\bnew\s+carrier\b/.test(t) ||
+    /\bcreate\s+(?:a\s+)?(?:new\s+)?carrier\b/.test(t) ||
+    /\bcarrier\s+draft\b/.test(t) ||
+    /\bcreate\s+carrier\s+draft\b/.test(t)
+  ) {
     return "create_carrier_draft";
   }
+  if (
+    /\b(list|check|show|get)\s+(?:all\s+)?carriers?\b/.test(t) ||
+    /\ball\s+carriers\b/.test(t)
+  ) {
+    return "list_carriers";
+  }
+  if (/\blookup\b/.test(t) && /\b(code|carrier)\b/.test(t)) {
+    return "find_carrier";
+  }
   return null;
+}
+
+/** True if the user message contains a 4-char carrier code token (A–Z / 0–9). */
+function hasCarrierCodeTokenInMessage(text: string): boolean {
+  return /\b[A-Z0-9]{4}\b/.test(text.trim().toUpperCase());
+}
+
+/** e.g. "Update carrier AB12" from Add detail after create — code only after the phrase. */
+function carrierCodeFromUpdateCarrierPhrase(text: string): string | null {
+  const m = text.trim().match(/^update\s+carrier\s+([A-Za-z0-9]{4})\b/i);
+  return m ? m[1]!.toUpperCase() : null;
 }
 
 type ComposeBodyPartial = Partial<ChatAssistantApiPayload> &
@@ -188,6 +237,34 @@ function buildUpdateCarrierFlowPayloadFromSession(
       step: "pick_category",
       carrierCode: code,
       categories: listUpdateCarrierCategories(),
+      multiSelect: true,
+    };
+  }
+
+  if (phase === "multi_section_form") {
+    const raw = data.selectedUpdateCategories;
+    const cats = Array.isArray(raw)
+      ? raw.filter(
+          (c): c is UpdateCategoryId =>
+            typeof c === "string" && isUpdateCategoryId(c),
+        )
+      : [];
+    if (!cats.length) {
+      return {
+        step: "pick_category",
+        carrierCode: code,
+        categories: listUpdateCarrierCategories(),
+        multiSelect: true,
+      };
+    }
+    return {
+      step: "multi_section_form",
+      carrierCode: code,
+      categoryForms: cats.map((id) => ({
+        categoryId: id,
+        categoryLabel: UPDATE_CATEGORY_LABELS[id],
+        form: buildUpdateSectionFormState(data, id),
+      })),
     };
   }
 
@@ -201,6 +278,7 @@ function buildUpdateCarrierFlowPayloadFromSession(
       step: "pick_category",
       carrierCode: code,
       categories: listUpdateCarrierCategories(),
+      multiSelect: true,
     };
   }
 
@@ -274,13 +352,16 @@ function buildSuccessSummaryCard(
               : "Summary";
 
   if (formatted.summaryFields?.length) {
-    return { title, fields: formatted.summaryFields };
+    return { title, fields: formatted.summaryFields, actions: formatted.actions };
   }
   if (formatted.summaryTable?.rows?.length) {
-    return { title, table: formatted.summaryTable };
+    return { title, table: formatted.summaryTable, actions: formatted.actions };
   }
   if (formatted.summaryLines?.length) {
-    return { title, lines: formatted.summaryLines };
+    return { title, lines: formatted.summaryLines, actions: formatted.actions };
+  }
+  if (formatted.actions?.length) {
+    return { title, actions: formatted.actions };
   }
   return undefined;
 }
@@ -382,6 +463,13 @@ async function runExecuteWithData(
       resultData: def.id === "find_carrier" ? result : undefined,
       missingFields: [],
       awaitingConfirmation: false,
+      /** Session uses WORKFLOW_RESET so currentWorkflowId is null; UI still needs chip + StructuredPanel find_carrier branch. */
+      ...(def.id === "find_carrier"
+        ? {
+            displayWorkflowId: def.id,
+            displayWorkflowName: def.userFacingLabel,
+          }
+        : {}),
     });
   } catch (e) {
     const msg = formatChatWorkflowError(e, def, data);
@@ -677,95 +765,21 @@ async function handleCreateCarrierDraftFormSubmit(
     });
   }
 
-  try {
-    const payload = buildCreateDraftPayload(merged);
-    const result = await createCarrierDraft(payload);
-    const formatted = formatSuccessResponse(def, result);
-    const s2 = updateSession(sessionId, {
-      ...WORKFLOW_RESET,
-      appendToHistory: [assistantMessage(formatted.message)],
-    });
-    return composeBody(s2, {
-      responseType: "success",
-      message: formatted.message,
-      summaryCard: buildSuccessSummaryCard(def, formatted),
-      resultData: result,
-      displayWorkflowId: def.id,
-      displayWorkflowName: def.userFacingLabel,
-      missingFields: [],
-      awaitingConfirmation: false,
-      createCarrierDraftForm: null,
-    });
-  } catch (e) {
-    if (e instanceof ZinniaApiError) {
-      const { fieldErrors, formLevelMessage } =
-        parseZinniaCreateDraftErrorBody(e.bodyText);
-      const headline =
-        formLevelMessage ??
-        (Object.keys(fieldErrors).length > 0
-          ? "Check the form for field errors."
-          : e.message);
-      const s2 = updateSession(sessionId, {
-        collectedParams: merged,
-        phase: "collecting",
-        awaitingConfirmation: false,
-        pendingFieldKey: null,
-        optionalFieldQueue: [],
-        missingFieldKeys: [],
-        createCarrierSkipOptionalWalkthrough: true,
-        createCarrierFormFirst: true,
-        appendToHistory: [assistantMessage(headline)],
-      });
-      return composeBody(s2, {
-        responseType: "error",
-        message: headline,
-        missingFields: [],
-        awaitingConfirmation: false,
-        createCarrierDraftForm: buildCreateCarrierDraftFormState(
-          merged,
-          fieldErrors,
-          Object.keys(fieldErrors).length === 0
-            ? (formLevelMessage ?? headline)
-            : formLevelMessage,
-        ),
-      });
-    }
-
-    const msg = formatChatWorkflowError(e, def, merged);
-    const s2 = updateSession(sessionId, {
-      collectedParams: merged,
-      phase: "collecting",
-      awaitingConfirmation: false,
-      pendingFieldKey: null,
-      optionalFieldQueue: [],
-      missingFieldKeys: [],
-      createCarrierSkipOptionalWalkthrough: true,
-      createCarrierFormFirst: true,
-      appendToHistory: [assistantMessage(msg)],
-    });
-    return composeBody(s2, {
-      responseType: "error",
-      message: msg,
-      missingFields: [],
-      awaitingConfirmation: false,
-      createCarrierDraftForm: buildCreateCarrierDraftFormState(
-        merged,
-        {},
-        msg,
-      ),
-    });
-  }
+  return transitionCreateCarrierToConfirmOrForm(
+    sessionId,
+    def,
+    merged,
+    "Form submitted.",
+  );
 }
 
 function startUpdateCarrierFormFlow(
   sessionId: string,
   def: WorkflowDefinition,
   merged: Record<string, unknown>,
-  analysis: IntentAnalysisResult,
+  _analysis: IntentAnalysisResult,
   rejected: { key: string; error: string }[],
 ): ChatApiSuccessBody {
-  const preamble = analysis.naturalPreamble;
-  const followUp = analysis.suggestedFollowUp;
   const cur = getSession(sessionId);
   const hadCarrierAttempt =
     merged.carrierCode !== undefined &&
@@ -774,13 +788,7 @@ function startUpdateCarrierFormFlow(
   const codeVal = validateCarrierCode(merged.carrierCode);
 
   if (codeVal.ok) {
-    const msg = [
-      preamble,
-      `Carrier **${codeVal.normalized}**. Pick a section below.`,
-      followUp,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const msg = `Carrier **${codeVal.normalized}**. Pick a section below.`;
     const session = updateSession(sessionId, {
       currentWorkflowId: def.id,
       phase: "collecting",
@@ -807,13 +815,7 @@ function startUpdateCarrierFormFlow(
       ? codeVal.error
       : rejected.find((r) => r.key === "carrierCode")?.error;
 
-  const introMsg = [
-    preamble,
-    "Enter the 4-character **carrier code** in the form or chat.",
-    followUp,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const introMsg = "";
 
   const session = updateSession(sessionId, {
     currentWorkflowId: def.id,
@@ -940,12 +942,184 @@ function handleUpdateCarrierCategorySubmit(
   });
 }
 
+function handleUpdateCarrierCategoriesSelectionSubmit(
+  sessionId: string,
+  session: AssistantSessionState,
+  categoryIds: string[],
+): ChatApiSuccessBody {
+  const codeVal = validateCarrierCode(session.collectedParams.carrierCode);
+  if (!codeVal.ok) {
+    const msg = "Enter the carrier code again.";
+    const s2 = updateSession(sessionId, {
+      collectedParams: {},
+      updateCarrierUiPhase: "need_code",
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: { step: "need_code" },
+    });
+  }
+
+  const unique = [...new Set(categoryIds.map((s) => s.trim()).filter(Boolean))];
+  const valid: UpdateCategoryId[] = [];
+  let firstErr: string | undefined;
+  for (const id of unique) {
+    const v = validateUpdateCategory(id);
+    if (v.ok) {
+      valid.push(v.normalized as UpdateCategoryId);
+    } else if (!firstErr) {
+      firstErr = v.error;
+    }
+  }
+
+  if (valid.length === 0) {
+    const msg = firstErr ?? "Select at least one section.";
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: {
+        step: "pick_category",
+        carrierCode: String(codeVal.normalized),
+        categories: listUpdateCarrierCategories(),
+        multiSelect: true,
+        categoryError: firstErr,
+      },
+    });
+  }
+
+  const merged: Record<string, unknown> = {
+    ...session.collectedParams,
+    carrierCode: codeVal.normalized,
+    selectedUpdateCategories: valid,
+  };
+  const msg =
+    valid.length === 1
+      ? `**${UPDATE_CATEGORY_LABELS[valid[0]!]}** — fill changes below, then submit.`
+      : `**${valid.length} sections** — fill changes below, then submit.`;
+  const session2 = updateSession(sessionId, {
+    collectedParams: merged,
+    updateCarrierUiPhase: "multi_section_form",
+    appendToHistory: [assistantMessage(msg)],
+  });
+  return composeBody(session2, {
+    responseType: "needs_input",
+    message: msg,
+    missingFields: [],
+    awaitingConfirmation: false,
+    createCarrierDraftForm: null,
+  });
+}
+
 async function executeUpdateCarrierAfterSectionConfirm(
   sessionId: string,
   session: AssistantSessionState,
 ): Promise<ChatApiSuccessBody> {
   const def = getWorkflowDefinition("update_carrier")!;
   const data = session.collectedParams;
+  const multiRaw = data.selectedUpdateCategories;
+  const multiCats =
+    Array.isArray(multiRaw) && multiRaw.length > 0
+      ? multiRaw.filter(
+          (c): c is UpdateCategoryId =>
+            typeof c === "string" && isUpdateCategoryId(c),
+        )
+      : null;
+
+  if (multiCats && multiCats.length > 0) {
+    try {
+      const result = await executeDefinition(def, data);
+      const formatted = formatSuccessResponse(def, result);
+      const stripped = stripMultiCategoryKeysFromCollected(data, multiCats);
+      const msg = [
+        formatted.message,
+        "",
+        "Update more sections below, or use **Continue** when done.",
+      ].join("\n");
+      const s2 = updateSession(sessionId, {
+        currentWorkflowId: "update_carrier",
+        phase: "collecting",
+        collectedParams: stripped,
+        updateCarrierUiPhase: "pick_category",
+        awaitingConfirmation: false,
+        missingFieldKeys: [],
+        pendingFieldKey: null,
+        optionalFieldQueue: [],
+        appendToHistory: [assistantMessage(msg)],
+      });
+      return composeBody(s2, {
+        responseType: "needs_input",
+        message: msg,
+        summaryCard: {
+          title: "Updated",
+          fields: buildUpdateSuccessSummaryCardFields(
+            result as CarrierDetails,
+            data,
+          ),
+          actions: formatted.actions,
+        },
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: null,
+        displayWorkflowId: "update_carrier",
+        displayWorkflowName: def.userFacingLabel,
+        resultData: result,
+      });
+    } catch (e) {
+      let fieldErrors: Record<string, string> = {};
+      let formLevel: string | undefined;
+      if (e instanceof ZinniaApiError) {
+        const p = parseZinniaUpdateCarrierErrorBody(e.bodyText);
+        fieldErrors = p.fieldErrors;
+        formLevel =
+          p.formLevelMessage ?? formatChatWorkflowError(e, def, data);
+      } else {
+        formLevel = formatChatWorkflowError(e, def, data);
+      }
+      const failMsg = formLevel ?? "Update failed.";
+      const s2 = updateSession(sessionId, {
+        collectedParams: data,
+        updateCarrierUiPhase: "multi_section_form",
+        awaitingConfirmation: false,
+        phase: "collecting",
+        appendToHistory: [assistantMessage(failMsg)],
+      });
+      const code = String(data.carrierCode ?? "").toUpperCase();
+      const categoryForms = multiCats.map((id) => ({
+        categoryId: id,
+        categoryLabel: UPDATE_CATEGORY_LABELS[id],
+        form: buildUpdateSectionFormState(
+          data,
+          id,
+          fieldErrors,
+          Object.keys(fieldErrors).length === 0 ? formLevel : undefined,
+        ),
+      }));
+      return composeBody(s2, {
+        responseType: "error",
+        message: failMsg,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: null,
+        updateCarrierFlow: {
+          step: "multi_section_form",
+          carrierCode: code,
+          categoryForms,
+        },
+      });
+    }
+  }
+
   const catRaw = data.updateCategory;
   if (typeof catRaw !== "string" || !isUpdateCategoryId(catRaw)) {
     const msg = "Choose a section again.";
@@ -991,10 +1165,14 @@ async function executeUpdateCarrierAfterSectionConfirm(
           result as CarrierDetails,
           data,
         ),
+        actions: formatted.actions,
       },
       missingFields: [],
       awaitingConfirmation: false,
       createCarrierDraftForm: null,
+      displayWorkflowId: "update_carrier",
+      displayWorkflowName: def.userFacingLabel,
+      resultData: result,
     });
   } catch (e) {
     let fieldErrors: Record<string, string> = {};
@@ -1035,6 +1213,112 @@ async function executeUpdateCarrierAfterSectionConfirm(
       },
     });
   }
+}
+
+async function handleUpdateCarrierMultiSectionFormSubmit(
+  sessionId: string,
+  session: AssistantSessionState,
+  values: Record<string, string>,
+): Promise<ChatApiSuccessBody> {
+  const def = getWorkflowDefinition("update_carrier")!;
+  const data = session.collectedParams;
+  const rawCats = data.selectedUpdateCategories;
+  const cats = Array.isArray(rawCats)
+    ? rawCats.filter(
+        (c): c is UpdateCategoryId =>
+          typeof c === "string" && isUpdateCategoryId(c),
+      )
+    : [];
+  if (cats.length === 0) {
+    const msg = "Choose sections again.";
+    const s2 = updateSession(sessionId, {
+      updateCarrierUiPhase: "pick_category",
+      awaitingConfirmation: false,
+      phase: "collecting",
+      appendToHistory: [assistantMessage(msg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: msg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+    });
+  }
+
+  type CatErr = { errors: Record<string, string>; formLevel?: string };
+  const errorsByCat: Partial<Record<UpdateCategoryId, CatErr>> = {};
+  let working: Record<string, unknown> = {
+    ...data,
+    selectedUpdateCategories: cats,
+  };
+  delete working.updateCategory;
+
+  for (const cat of cats) {
+    const slice = sliceUpdateSectionValuesFromFlat(values, cat);
+    const vr = validateAndMergeUpdateCarrierSection({ ...working }, cat, slice);
+    if (!vr.ok) {
+      errorsByCat[cat] = {
+        errors: vr.errors,
+        formLevel: vr.formLevelError,
+      };
+    } else {
+      working = vr.merged;
+    }
+  }
+
+  if (Object.keys(errorsByCat).length > 0) {
+    const failMsg = "Fix the highlighted fields, then submit again.";
+    const s2 = updateSession(sessionId, {
+      appendToHistory: [assistantMessage(failMsg)],
+    });
+    return composeBody(s2, {
+      responseType: "error",
+      message: failMsg,
+      missingFields: [],
+      awaitingConfirmation: false,
+      createCarrierDraftForm: null,
+      updateCarrierFlow: {
+        step: "multi_section_form",
+        carrierCode: String(data.carrierCode ?? "").toUpperCase(),
+        categoryForms: cats.map((id) => {
+          const slice = sliceUpdateSectionValuesFromFlat(values, id);
+          const er = errorsByCat[id];
+          return {
+            categoryId: id,
+            categoryLabel: UPDATE_CATEGORY_LABELS[id],
+            form: buildUpdateSectionFormStateFromStrings(
+              id,
+              slice,
+              er?.errors ?? {},
+              er?.formLevel,
+            ),
+          };
+        }),
+      },
+    });
+  }
+
+  delete working.updateCategory;
+  working.selectedUpdateCategories = cats;
+
+  const { cardText, summaryCard } = resolveConfirmationUi(def, working);
+  const session2 = updateSession(sessionId, {
+    collectedParams: working,
+    updateCarrierUiPhase: "section_confirm",
+    phase: "confirming",
+    awaitingConfirmation: true,
+    appendToHistory: [assistantMessage(cardText)],
+  });
+  return composeBody(session2, {
+    responseType: "confirm",
+    message: cardText,
+    summaryCard,
+    missingFields: [],
+    awaitingConfirmation: true,
+    createCarrierDraftForm: null,
+    updateCarrierFlow: null,
+  });
 }
 
 async function handleUpdateCarrierSectionFormSubmit(
@@ -1115,11 +1399,16 @@ function handleUpdateCarrierNavigate(
   target: "back_carrier_code" | "back_categories",
 ): ChatApiSuccessBody {
   if (target === "back_carrier_code") {
-    if (session.updateCarrierUiPhase !== "pick_category") {
+    const ph = session.updateCarrierUiPhase;
+    if (
+      ph !== "pick_category" &&
+      ph !== "multi_section_form" &&
+      ph !== "section_form"
+    ) {
       const s = getSession(sessionId);
       return composeBody(s, {
         responseType: "needs_input",
-        message: "Use Back on the section list.",
+        message: "Use Back from the category list or section form.",
         awaitingConfirmation: false,
       });
     }
@@ -1141,7 +1430,11 @@ function handleUpdateCarrierNavigate(
   }
 
   const ph = session.updateCarrierUiPhase;
-  if (ph !== "section_form" && ph !== "section_confirm") {
+  if (
+    ph !== "section_form" &&
+    ph !== "section_confirm" &&
+    ph !== "multi_section_form"
+  ) {
     const s = getSession(sessionId);
     return composeBody(s, {
       responseType: "needs_input",
@@ -1150,16 +1443,27 @@ function handleUpdateCarrierNavigate(
     });
   }
 
-  const cat = session.collectedParams.updateCategory;
+  const data = session.collectedParams;
+  const multiRaw = data.selectedUpdateCategories;
+  const multiCats =
+    Array.isArray(multiRaw) && multiRaw.length > 0
+      ? multiRaw.filter(
+          (c): c is UpdateCategoryId =>
+            typeof c === "string" && isUpdateCategoryId(c),
+        )
+      : [];
+
   let nextCollected: Record<string, unknown>;
-  if (typeof cat === "string" && isUpdateCategoryId(cat)) {
-    nextCollected = stripUpdateCategoryKeysFromCollected(
-      session.collectedParams,
-      cat,
-    );
+  if (multiCats.length > 0) {
+    nextCollected = stripMultiCategoryKeysFromCollected(data, multiCats);
   } else {
-    nextCollected = { ...session.collectedParams };
-    delete nextCollected.updateCategory;
+    const cat = data.updateCategory;
+    if (typeof cat === "string" && isUpdateCategoryId(cat)) {
+      nextCollected = stripUpdateCategoryKeysFromCollected(data, cat);
+    } else {
+      nextCollected = { ...data };
+      delete nextCollected.updateCategory;
+    }
   }
 
   const codeVal = validateCarrierCode(nextCollected.carrierCode);
@@ -1182,7 +1486,7 @@ function handleUpdateCarrierNavigate(
   }
 
   nextCollected.carrierCode = String(codeVal.normalized);
-  const msg = "Pick a section to update, or change the code from the list.";
+  const msg = "Pick one or more sections to update, or change the code.";
   const s2 = updateSession(sessionId, {
     collectedParams: nextCollected,
     updateCarrierUiPhase: "pick_category",
@@ -1429,8 +1733,6 @@ async function continueAfterMerge(
       def.id === "find_carrier"
         ? buildFindCarrierCollectingMessage({
             fieldPrompt: field.businessPrompt,
-            preamble,
-            followUp,
           })
         : [preamble, field.businessPrompt, followUp].filter(Boolean).join("\n\n");
     const cur = getSession(sessionId);
@@ -1696,11 +1998,27 @@ async function handleIdleTurn(
     return runImmediateWorkflow(sessionId, def);
   }
 
-  const { merged, rejected } = mergeExtractedFields(
+  const { merged: mergedInitial, rejected } = mergeExtractedFields(
     def,
     {},
     extractedToRecord(analysis.extractedFields),
   );
+  let merged = mergedInitial;
+
+  if (
+    def.id === "find_carrier" &&
+    !hasCarrierCodeTokenInMessage(text)
+  ) {
+    merged = { ...merged };
+    delete merged.carrierCode;
+  }
+
+  if (def.id === "update_carrier") {
+    const fromPhrase = carrierCodeFromUpdateCarrierPhrase(text);
+    if (fromPhrase) {
+      merged = { ...merged, carrierCode: fromPhrase };
+    }
+  }
 
   if (def.id === "create_carrier_draft") {
     return startCreateCarrierWithForm(
@@ -1729,7 +2047,7 @@ async function handleIdleTurn(
       def.id === "find_carrier" && nextField
         ? buildFindCarrierCollectingMessage({
             fieldPrompt: nextField.businessPrompt,
-            preamble: [analysis.naturalPreamble, first.error].filter(Boolean).join("\n\n"),
+            validationNote: first.error,
           })
         : [
             analysis.naturalPreamble,
@@ -1865,9 +2183,7 @@ async function handleCollectingTurn(
         : def.id === "find_carrier"
           ? buildFindCarrierCollectingMessage({
               fieldPrompt: field.businessPrompt,
-              preamble: [analysis.naturalPreamble, pendingReject.error]
-                .filter(Boolean)
-                .join("\n\n"),
+              validationNote: pendingReject.error,
             })
           : [pendingReject.error, field.businessPrompt].filter(Boolean).join("\n\n");
     const s2 = updateSession(sessionId, {
@@ -1912,9 +2228,19 @@ async function handleConfirmTurn(
     live.updateCarrierUiPhase === "section_confirm"
   ) {
     if (decision === "no") {
-      const msg = "Adjust the form below, then submit again.";
+      const liveParams = getSession(sessionId).collectedParams;
+      const multiRaw = liveParams.selectedUpdateCategories;
+      const hasMulti =
+        Array.isArray(multiRaw) &&
+        multiRaw.length > 0 &&
+        multiRaw.every(
+          (c) => typeof c === "string" && isUpdateCategoryId(c),
+        );
+      const msg = hasMulti
+        ? "Adjust the forms below, then submit again."
+        : "Adjust the form below, then submit again.";
       const s2 = updateSession(sessionId, {
-        updateCarrierUiPhase: "section_form",
+        updateCarrierUiPhase: hasMulti ? "multi_section_form" : "section_form",
         awaitingConfirmation: false,
         phase: "collecting",
         appendToHistory: [assistantMessage(msg)],
@@ -2055,6 +2381,39 @@ async function handleConfirmTurn(
       updateCarrierFlow: null,
     });
   } catch (e) {
+    if (def.id === "create_carrier_draft" && e instanceof ZinniaApiError) {
+      const { fieldErrors, formLevelMessage } =
+        parseZinniaCreateDraftErrorBody(e.bodyText);
+      const headline =
+        formLevelMessage ??
+        (Object.keys(fieldErrors).length > 0
+          ? "Check the form for field errors."
+          : e.message);
+      const s2 = updateSession(sessionId, {
+        phase: "collecting",
+        awaitingConfirmation: false,
+        pendingFieldKey: null,
+        optionalFieldQueue: [],
+        missingFieldKeys: [],
+        createCarrierSkipOptionalWalkthrough: true,
+        createCarrierFormFirst: true,
+        appendToHistory: [assistantMessage(headline)],
+      });
+      return composeBody(s2, {
+        responseType: "error",
+        message: headline,
+        missingFields: [],
+        awaitingConfirmation: false,
+        createCarrierDraftForm: buildCreateCarrierDraftFormState(
+          session.collectedParams,
+          fieldErrors,
+          Object.keys(fieldErrors).length === 0
+            ? (formLevelMessage ?? headline)
+            : formLevelMessage,
+        ),
+      });
+    }
+
     const msg = formatChatWorkflowError(e, def, session.collectedParams);
     const s2 = updateSession(sessionId, {
       appendToHistory: [assistantMessage(msg)],
@@ -2073,6 +2432,7 @@ export async function handleChatTurn(input: {
   createCarrierDraftForm?: Record<string, unknown>;
   updateCarrierCode?: string;
   updateCarrierCategoryId?: string;
+  updateCarrierCategoryIds?: string[];
   updateCarrierSectionForm?: Record<string, string>;
   updateCarrierNavigate?: "back_carrier_code" | "back_categories";
 }): Promise<ChatApiSuccessBody> {
@@ -2126,17 +2486,45 @@ export async function handleChatTurn(input: {
     typeof sectionForm === "object" &&
     !Array.isArray(sectionForm) &&
     session.currentWorkflowId === "update_carrier" &&
-    session.updateCarrierUiPhase === "section_form"
+    (session.updateCarrierUiPhase === "section_form" ||
+      session.updateCarrierUiPhase === "multi_section_form")
   ) {
     session = updateSession(sessionId, {
       appendToHistory: [
         userMessage("Submitted update form."),
       ],
     });
+    const live = getSession(sessionId);
+    if (live.updateCarrierUiPhase === "multi_section_form") {
+      return await handleUpdateCarrierMultiSectionFormSubmit(
+        sessionId,
+        live,
+        sectionForm,
+      );
+    }
     return await handleUpdateCarrierSectionFormSubmit(
       sessionId,
-      getSession(sessionId),
+      live,
       sectionForm,
+    );
+  }
+
+  const updCategoryIds = input.updateCarrierCategoryIds;
+  if (
+    Array.isArray(updCategoryIds) &&
+    updCategoryIds.length > 0 &&
+    session.currentWorkflowId === "update_carrier" &&
+    session.updateCarrierUiPhase === "pick_category"
+  ) {
+    session = updateSession(sessionId, {
+      appendToHistory: [
+        userMessage(`Selected sections: ${updCategoryIds.join(", ")}.`),
+      ],
+    });
+    return handleUpdateCarrierCategoriesSelectionSubmit(
+      sessionId,
+      getSession(sessionId),
+      updCategoryIds,
     );
   }
 
@@ -2174,25 +2562,14 @@ export async function handleChatTurn(input: {
   }
 
   if (session.conversationHistory.length === 0 && !text) {
-    const greeting = [
-      CHAT_AGENT_TITLE + ".",
-      "",
-      "Type what you need or pick an action below.",
-    ].join("\n");
+    const greeting = "";
     session = updateSession(sessionId, {
       appendToHistory: [assistantMessage(greeting)],
     });
     return composeBody(session, {
       responseType: "greeting",
       message: greeting,
-      summaryCard: {
-        lines: [
-          "New carrier",
-          "Lookup by code",
-          "List carriers",
-          "Update carrier",
-        ],
-      },
+      summaryCard: { actions: MAIN_MENU_ACTIONS },
       awaitingConfirmation: false,
     });
   }
@@ -2212,6 +2589,20 @@ export async function handleChatTurn(input: {
   session = updateSession(sessionId, {
     appendToHistory: [userMessage(text)],
   });
+
+  if (wantsMainMenu(text)) {
+    const { message: menuMsg, summaryCard } = buildMainMenuAssistantReply();
+    session = updateSession(sessionId, {
+      ...WORKFLOW_RESET,
+      appendToHistory: [assistantMessage(menuMsg)],
+    });
+    return composeBody(session, {
+      responseType: "greeting",
+      message: menuMsg,
+      summaryCard,
+      awaitingConfirmation: false,
+    });
+  }
 
   if (wantsReset(text)) {
     session = updateSession(sessionId, {

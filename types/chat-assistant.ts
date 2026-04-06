@@ -24,6 +24,8 @@ export type ChatSummaryCard = {
   fields?: { label: string; value: string }[];
   /** Simple grid for lists (human column labels) */
   table?: ChatSummaryTable;
+  /** Action buttons that send a message when clicked */
+  actions?: { label: string; message: string }[];
 };
 
 export type FormFieldSelectOption = { value: string; label: string };
@@ -61,6 +63,17 @@ export type UpdateCarrierFlowPayload =
       carrierCode: string;
       categories: { id: string; label: string }[];
       categoryError?: string;
+      /** When true, user selects one or more sections (checkboxes) then continues. */
+      multiSelect?: boolean;
+    }
+  | {
+      step: "multi_section_form";
+      carrierCode: string;
+      categoryForms: Array<{
+        categoryId: string;
+        categoryLabel: string;
+        form: UpdateCarrierSectionFormState;
+      }>;
     }
   | {
       step: "section_form";
@@ -97,6 +110,8 @@ export type ChatApiRequestBody = {
   updateCarrierCode?: string;
   /** Update flow: choose section (pick_category phase). */
   updateCarrierCategoryId?: string;
+  /** Update flow: choose one or more sections (pick_category with multiSelect). */
+  updateCarrierCategoryIds?: string[];
   /** Update flow: submit section fields (section_form phase). */
   updateCarrierSectionForm?: Record<string, string>;
   /** Update flow: go back to carrier code or category list. */

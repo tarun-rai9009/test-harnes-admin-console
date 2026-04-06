@@ -26,6 +26,7 @@ function formatCarrierSuccess(result: unknown): {
   message: string;
   summaryLines?: string[];
   summaryFields?: { label: string; value: string }[];
+  actions?: { label: string; message: string }[];
 } {
   const d = result as CarrierDetails & Record<string, unknown>;
 
@@ -39,14 +40,19 @@ function formatCarrierSuccess(result: unknown): {
     typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : "";
 
   const message = code
-    ? `Draft saved: ${code}${name ? ` (${name})` : ""}.`
-    : "Draft saved.";
+    ? `Carrier created successfully with status draft for ${code}${name ? ` (${name})` : ""}.`
+    : "Carrier created successfully with status draft.";
 
   const summaryLines = [message, "Full response below."];
 
   return {
     message,
     summaryLines,
+    actions: [
+      { label: "View detail", message: `Lookup by code ${code}` },
+      { label: "Add detail", message: `Update carrier ${code}` },
+      { label: "Continue", message: "clear" },
+    ],
   };
 }
 

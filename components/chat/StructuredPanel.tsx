@@ -3,6 +3,7 @@
 import { CarrierDetailSections } from "@/components/chat/CarrierDetailSections";
 import { CreateCarrierDraftForm } from "@/components/chat/CreateCarrierDraftForm";
 import { UpdateCarrierFlowPanel } from "@/components/chat/UpdateCarrierFlowPanel";
+import { useCallback, useState, type FormEvent } from "react";
 import type {
   ChatAssistantApiPayload,
   ChatSummaryCard,
@@ -26,10 +27,12 @@ type Props = Pick<
   onSubmitCreateCarrierDraftForm?: (values: Record<string, string>) => void;
   onSubmitUpdateCarrierCode?: (code: string) => void;
   onSelectUpdateCarrierCategory?: (categoryId: string) => void;
+  onSubmitSelectedUpdateCarrierCategories?: (categoryIds: string[]) => void;
   onSubmitUpdateCarrierSectionForm?: (values: Record<string, string>) => void;
   onUpdateCarrierChooseDifferentSection?: () => void;
   onBackUpdateCarrierToCode?: () => void;
   onBackUpdateCarrierToCategories?: () => void;
+  onActionClick?: (message: string) => void;
   disabled?: boolean;
   className?: string;
 };
@@ -37,14 +40,23 @@ type Props = Pick<
 function SummaryCardView({
   card,
   variant = "default",
+  onActionClick,
+  disabled,
+  mainMenuActions = false,
 }: {
   card: ChatSummaryCard;
   variant?: "default" | "success";
+  onActionClick?: (message: string) => void;
+  disabled?: boolean;
+  /** Greeting task menu — orange accent, left-aligned chat-style card + buttons */
+  mainMenuActions?: boolean;
 }) {
   const shell =
     variant === "success"
       ? "rounded-xl border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-5 py-4 shadow-[var(--card-shadow-sm)]"
-      : "ui-card";
+      : mainMenuActions
+        ? "ui-chat-main-menu-card self-start"
+        : "ui-card";
 
   const hasLines = Boolean(card.lines?.length);
   const hasFields = Boolean(card.fields?.length);
@@ -126,6 +138,31 @@ function SummaryCardView({
               ))}
             </tbody>
           </table>
+        </div>
+      ) : null}
+      {card.actions?.length ? (
+        <div
+          className={
+            mainMenuActions
+              ? "mt-5 flex w-full flex-col items-stretch gap-2.5"
+              : "mt-4 flex flex-wrap justify-start gap-2 border-t border-border/60 pt-4"
+          }
+        >
+          {card.actions.map((action, i) => (
+            <button
+              key={i}
+              type="button"
+              disabled={disabled}
+              onClick={() => onActionClick?.(action.message)}
+              className={
+                mainMenuActions
+                  ? "ui-chat-main-menu-btn"
+                  : "ui-btn-secondary shrink-0 px-3 py-1.5 text-sm"
+              }
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -320,6 +357,67 @@ function ResultDataView({ data }: { data: unknown }) {
   );
 }
 
+function FindCarrierLookupCodeForm({
+  disabled,
+  onSubmitCode,
+}: {
+  disabled?: boolean;
+  onSubmitCode: (code: string) => void;
+}) {
+  const [codeInput, setCodeInput] = useState("");
+  const [clientError, setClientError] = useState("");
+
+  const submit = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault();
+      if (disabled) return;
+      const t = codeInput.trim().toUpperCase();
+      if (!/^[A-Z0-9]{4}$/.test(t)) {
+        setClientError("Enter exactly 4 letters or numbers (e.g. A1B2).");
+        return;
+      }
+      setClientError("");
+      onSubmitCode(t);
+    },
+    [codeInput, disabled, onSubmitCode],
+  );
+
+  return (
+    <form className="ui-panel" onSubmit={submit}>
+      <p className="ui-panel-title">Carrier lookup</p>
+      <p className="ui-panel-desc">Enter the 4-character carrier code.</p>
+      {clientError ? (
+        <p className="ui-alert-danger" role="alert">
+          {clientError}
+        </p>
+      ) : null}
+      <label
+        htmlFor="find-carrier-code"
+        className="mt-4 block text-sm font-medium text-foreground"
+      >
+        Carrier code
+      </label>
+      <input
+        id="find-carrier-code"
+        name="carrierCode"
+        type="text"
+        maxLength={8}
+        disabled={disabled}
+        value={codeInput}
+        onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+        className="ui-input uppercase tracking-widest"
+        autoComplete="off"
+        placeholder="e.g. A1B2"
+      />
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={disabled} className="ui-btn-primary">
+          Look up
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function StructuredPanel({
   summaryCard,
   resultData,
@@ -335,15 +433,39 @@ export function StructuredPanel({
   onSubmitCreateCarrierDraftForm,
   onSubmitUpdateCarrierCode,
   onSelectUpdateCarrierCategory,
+  onSubmitSelectedUpdateCarrierCategories,
   onSubmitUpdateCarrierSectionForm,
   onUpdateCarrierChooseDifferentSection,
   onBackUpdateCarrierToCode,
   onBackUpdateCarrierToCategories,
+  onActionClick,
   disabled,
   className = "",
 }: Props) {
   const showResult =
     responseType === "success" && resultData !== undefined && resultData !== null;
+
+  /** Brief orange summary duplicates the full record; show only full record + actions in that panel. */
+  const suppressFindCarrierBriefCard =
+    workflowId === "find_carrier" &&
+    responseType === "success" &&
+    showResult;
+
+  /** Continue (`message: "clear"`) renders under full response; keep View detail / Add detail on the summary card. */
+  const createDraftContinueAction =
+    workflowId === "create_carrier_draft" &&
+    responseType === "success" &&
+    showResult
+      ? summaryCard?.actions?.find((a) => a.message === "clear")
+      : undefined;
+
+  const summaryCardForDisplay =
+    createDraftContinueAction && summaryCard
+      ? {
+          ...summaryCard,
+          actions: summaryCard.actions?.filter((a) => a.message !== "clear"),
+        }
+      : summaryCard;
 
   return (
     <div
@@ -360,18 +482,24 @@ export function StructuredPanel({
         </div>
       ) : null}
 
-      {summaryCard &&
-      (summaryCard.title ||
-        summaryCard.lines?.length ||
-        summaryCard.fields?.length ||
-        summaryCard.table?.rows?.length) ? (
+      {summaryCardForDisplay &&
+      !suppressFindCarrierBriefCard &&
+      (summaryCardForDisplay.title ||
+        summaryCardForDisplay.lines?.length ||
+        summaryCardForDisplay.fields?.length ||
+        summaryCardForDisplay.table?.rows?.length ||
+        summaryCardForDisplay.actions?.length) ? (
         <SummaryCardView
-          card={summaryCard}
+          card={summaryCardForDisplay}
+          onActionClick={onActionClick}
+          disabled={disabled}
+          mainMenuActions={responseType === "greeting"}
           variant={
             responseType === "success" &&
-            (Boolean(summaryCard.fields?.length) ||
-              Boolean(summaryCard.table?.rows?.length) ||
-              Boolean(summaryCard.lines?.length))
+            (Boolean(summaryCardForDisplay.fields?.length) ||
+              Boolean(summaryCardForDisplay.table?.rows?.length) ||
+              Boolean(summaryCardForDisplay.lines?.length) ||
+              Boolean(summaryCardForDisplay.actions?.length))
               ? "success"
               : "default"
           }
@@ -397,13 +525,28 @@ export function StructuredPanel({
           disabled={disabled}
           onSubmitCarrierCode={onSubmitUpdateCarrierCode}
           onSelectCategory={onSelectUpdateCarrierCategory}
+          onSubmitSelectedCategories={onSubmitSelectedUpdateCarrierCategories}
           onSubmitSectionForm={onSubmitUpdateCarrierSectionForm}
           onBackToCarrierCode={onBackUpdateCarrierToCode}
           onBackToCategories={onBackUpdateCarrierToCategories}
         />
       ) : null}
 
-      {missingFields && missingFields.length > 0 ? (
+      {workflowId === "find_carrier" &&
+      missingFields?.includes("carrierCode") &&
+      onActionClick ? (
+        <FindCarrierLookupCodeForm
+          disabled={disabled}
+          onSubmitCode={onActionClick}
+        />
+      ) : null}
+
+      {missingFields &&
+      missingFields.length > 0 &&
+      !(
+        workflowId === "find_carrier" &&
+        missingFields.includes("carrierCode")
+      ) ? (
         <div className="ui-alert-warning">
           <p className="text-sm font-semibold text-[color:var(--warning-text)]">
             Still needed
@@ -429,12 +572,12 @@ export function StructuredPanel({
         <div className="rounded-xl border border-[color:var(--info-border)] bg-[color:var(--info-bg)] px-5 py-4 shadow-[var(--card-shadow-sm)]">
           <p className="text-[15px] font-semibold text-foreground">
             {workflowId === "update_carrier"
-              ? "Apply this section?"
+              ? "Apply these updates?"
               : "Ready to save?"}
           </p>
           <p className="mt-1.5 text-sm leading-relaxed text-accent-muted">
             {workflowId === "update_carrier"
-              ? "Confirm to send this section. You can update more after."
+              ? "Confirm to send the update. You can change more sections after."
               : "Confirm to save."}
           </p>
           {workflowId === "update_carrier" &&
@@ -495,6 +638,41 @@ export function StructuredPanel({
           ) : (
             <ResultDataView data={resultData} />
           )}
+          {workflowId === "find_carrier" &&
+          suppressFindCarrierBriefCard &&
+          summaryCard?.actions?.length &&
+          onActionClick ? (
+            <div className="mt-4 flex flex-wrap justify-start gap-2 border-t border-border/60 pt-4">
+              {summaryCard.actions.map((action, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onActionClick(action.message)}
+                  className="ui-btn-secondary shrink-0 px-3 py-1.5 text-sm"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {workflowId === "create_carrier_draft" &&
+          showResult &&
+          createDraftContinueAction &&
+          onActionClick ? (
+            <div className="mt-4 flex flex-wrap justify-start gap-2 border-t border-border/60 pt-4">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  onActionClick(createDraftContinueAction.message)
+                }
+                className="ui-btn-secondary shrink-0 px-3 py-1.5 text-sm"
+              >
+                {createDraftContinueAction.label}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

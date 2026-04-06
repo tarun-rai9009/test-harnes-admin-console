@@ -4,16 +4,13 @@ export function getOrCreateSessionId(): string {
   if (typeof window === "undefined") {
     return "";
   }
+  const id = crypto.randomUUID();
   try {
-    let id = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!id) {
-      id = crypto.randomUUID();
-      window.sessionStorage.setItem(STORAGE_KEY, id);
-    }
-    return id;
+    window.sessionStorage.setItem(STORAGE_KEY, id);
   } catch {
-    return crypto.randomUUID();
+    // ignore
   }
+  return id;
 }
 
 export function rotateSessionId(): string {
