@@ -92,6 +92,17 @@ body {
     @apply rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50;
   }
 
+  .ui-btn-danger {
+    @apply rounded-lg border px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: var(--danger-border-strong);
+    background-color: var(--danger-bg);
+    color: var(--danger-text);
+  }
+
+  .ui-btn-danger:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+
   .ui-btn-ghost {
     @apply text-sm font-semibold text-accent underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50;
   }

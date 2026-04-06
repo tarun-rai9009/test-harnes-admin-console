@@ -4,6 +4,7 @@ export {
 } from "./auth";
 export {
   createCarrierDraft,
+  deleteCarrier,
   getAllCarriers,
   getCarrierByCode,
   getDatapoints,

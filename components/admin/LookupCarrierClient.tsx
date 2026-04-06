@@ -96,18 +96,6 @@ export function LookupCarrierClient() {
       {carrier ? (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="ui-btn-secondary"
-              onClick={() => {
-                setCarrier(null);
-                setCodeInput("");
-                setError("");
-                router.replace("/lookup");
-              }}
-            >
-              Search again
-            </button>
             <Link
               href={`/update?code=${encodeURIComponent(carrier.carrierCode)}`}
               className="ui-btn-secondary inline-flex shrink-0 items-center justify-center no-underline"

@@ -22,6 +22,11 @@ const actions = [
     title: "List All Carriers",
     desc: "Table of carriers from Zinnia.",
   },
+  {
+    href: "/delete",
+    title: "Delete carrier by code",
+    desc: "Remove a carrier permanently using its 4-character code.",
+  },
 ] as const;
 
 export default function HomePage() {

@@ -53,6 +53,14 @@ export async function updateCarrier(
   });
 }
 
+/** DELETE /carriers/{carrierCode} — Zinnia returns 204 No Content. */
+export async function deleteCarrier(carrierCode: string): Promise<void> {
+  await requestZinniaJson<void>({
+    method: "DELETE",
+    path: zinniaCarrierPath(carrierCode),
+  });
+}
+
 /** GET /carriers */
 export async function getAllCarriers(): Promise<CarrierSummary[]> {
   const raw = await requestZinniaJson<CarrierListApiResponse>({

@@ -298,6 +298,31 @@ function messageForZinniaApi(
     return "No carrier to update. Verify the code.";
   }
 
+  if (status === 404 && method === "DELETE" && isSingleCarrierPath(path)) {
+    const p = carrierCodeFromCarriersPath(path);
+    const d =
+      typeof collected?.carrierCode === "string"
+        ? collected.carrierCode.trim().toUpperCase()
+        : undefined;
+    if (p || d) {
+      const code = (p ?? d)!.toUpperCase();
+      return `No carrier ${code} to delete. Verify the code.`;
+    }
+    return "No carrier to delete. Verify the code.";
+  }
+
+  if (
+    (status === 400 || status === 422) &&
+    method === "DELETE" &&
+    isSingleCarrierPath(path)
+  ) {
+    const list = extractZinniaValidationIssuesFromBody(e.bodyText);
+    if (list.length) {
+      return `Couldn’t delete carrier: ${list.slice(0, 4).join(" · ")}`;
+    }
+    return "Couldn’t delete carrier. Check the request and try again.";
+  }
+
   if (
     workflowId === "create_carrier_draft" &&
     path.includes("/carriers/draft") &&

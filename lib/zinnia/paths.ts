@@ -7,6 +7,7 @@
  * | POST | /carriers/draft |
  * | GET | /carriers/{carrierCode} |
  * | PUT | /carriers/{carrierCode} |
+ * | DELETE | /carriers/{carrierCode} |
  * | GET | /carriers |
  * | GET | /datapoints |
  */

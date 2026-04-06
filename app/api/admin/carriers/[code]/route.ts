@@ -5,7 +5,7 @@ import {
 } from "@/lib/workflows/definitions/update-carrier-payload";
 import { isUpdateCategoryId } from "@/lib/workflows/update-carrier-section-form";
 import { validateCarrierCode } from "@/lib/workflows/validators";
-import { getCarrierByCode } from "@/lib/zinnia/carriers";
+import { deleteCarrier, getCarrierByCode } from "@/lib/zinnia/carriers";
 import { formatChatWorkflowError } from "@/lib/zinnia/workflow-user-errors";
 import { parseZinniaUpdateCarrierErrorBody } from "@/lib/zinnia/parse-update-carrier-errors";
 import { ZinniaApiError } from "@/lib/zinnia/types";
@@ -43,6 +43,40 @@ export async function GET(
     }
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Lookup failed." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  ctx: { params: Promise<{ code: string }> },
+) {
+  const { code: raw } = await ctx.params;
+  const codeVal = validateCarrierCode(raw);
+  if (!codeVal.ok) {
+    return NextResponse.json(
+      { error: codeVal.error },
+      { status: 400 },
+    );
+  }
+  const urlCode = String(codeVal.normalized);
+  const data: Record<string, unknown> = { carrierCode: urlCode };
+  try {
+    await deleteCarrier(urlCode);
+    return new NextResponse(null, { status: 204 });
+  } catch (e) {
+    if (e instanceof ZinniaApiError) {
+      return NextResponse.json(
+        {
+          error: formatChatWorkflowError(e, undefined, data),
+          bodyText: e.bodyText,
+        },
+        { status: e.status >= 400 && e.status < 600 ? e.status : 502 },
+      );
+    }
+    return NextResponse.json(
+      { error: formatChatWorkflowError(e, undefined, data) },
       { status: 500 },
     );
   }

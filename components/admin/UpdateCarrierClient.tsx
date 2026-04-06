@@ -191,6 +191,14 @@ export function UpdateCarrierClient() {
 
   return (
     <div className="space-y-8">
+      {successBanner ? (
+        <p
+          className="rounded-lg border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-4 py-3 text-sm text-[color:var(--success-text)]"
+          role="status"
+        >
+          {successBanner}
+        </p>
+      ) : null}
       {phase.kind === "code" ? (
         <form className="ui-panel max-w-md" onSubmit={submitCode}>
           <p className="ui-panel-title">Carrier code</p>
@@ -239,6 +247,7 @@ export function UpdateCarrierClient() {
                 setCollected({});
                 setCodeInput("");
                 setFormOverride(null);
+                setSuccessBanner("");
               }}
             >
               Change code
@@ -257,14 +266,6 @@ export function UpdateCarrierClient() {
 
       {phase.kind === "categories" && carrier ? (
         <div className="space-y-4">
-          {successBanner ? (
-            <p
-              className="rounded-lg border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-4 py-3 text-sm text-[color:var(--success-text)]"
-              role="status"
-            >
-              {successBanner}
-            </p>
-          ) : null}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

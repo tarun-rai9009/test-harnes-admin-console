@@ -64,7 +64,7 @@ export function CreateCarrierPageClient() {
     () => carrierCodeFromPayload(successPayload),
     [successPayload],
   );
-  const canUpdate =
+  const canViewDetails =
     successCode.length === 4 && /^[A-Z0-9]{4}$/.test(successCode);
 
   if (successPayload) {
@@ -77,13 +77,17 @@ export function CreateCarrierPageClient() {
           Draft created successfully.
         </p>
         <CarrierDetailSections data={successPayload} variant="basic" />
+        <p className="max-w-xl text-sm text-accent-muted">
+          View full carrier details on the lookup page — your new code is
+          pre-filled and loaded automatically.
+        </p>
         <div className="flex flex-wrap gap-2">
-          {canUpdate ? (
+          {canViewDetails ? (
             <Link
-              href={`/update?code=${encodeURIComponent(successCode)}`}
+              href={`/lookup?code=${encodeURIComponent(successCode)}`}
               className="ui-btn-primary inline-flex shrink-0 items-center justify-center no-underline"
             >
-              Update carrier
+              View details
             </Link>
           ) : null}
           <button
