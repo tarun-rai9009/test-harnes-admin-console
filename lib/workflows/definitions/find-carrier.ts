@@ -8,6 +8,7 @@ function formatFindSuccess(result: unknown): {
   message: string;
   summaryLines?: string[];
   summaryFields?: { label: string; value: string }[];
+  actions?: { label: string; message: string }[];
 } {
   const d = result as CarrierDetails;
   const name = d.carrierName?.trim() || "this carrier";
@@ -16,6 +17,7 @@ function formatFindSuccess(result: unknown): {
   return {
     message: headline,
     summaryFields: carrierLookupBriefSummaryFields(d),
+    actions: [{ label: "Continue", message: "next" }],
   };
 }
 

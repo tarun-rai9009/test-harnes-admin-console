@@ -73,6 +73,19 @@ export function buildUpdateCarrierSectionFormFields(
   return mergeEnumFieldMeta(raw);
 }
 
+/** Subset of a flat form map for one update section (field keys are globally unique). */
+export function sliceUpdateSectionValuesFromFlat(
+  values: Record<string, string>,
+  categoryId: UpdateCategoryId,
+): Record<string, string> {
+  const keys = UPDATE_CATEGORY_FIELD_KEYS[categoryId];
+  const out: Record<string, string> = {};
+  for (const k of keys) {
+    out[k] = values[k] ?? "";
+  }
+  return out;
+}
+
 export function stringValuesForUpdateSection(
   data: Record<string, unknown>,
   categoryId: UpdateCategoryId,

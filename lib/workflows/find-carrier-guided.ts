@@ -1,12 +1,9 @@
-/** Short guided copy when we still need a carrier code to look someone up. */
+/** Short copy when we still need a carrier code; panel form carries the rest. */
 
 export function buildFindCarrierCollectingMessage(parts: {
   fieldPrompt: string;
-  preamble?: string;
-  followUp?: string;
+  /** Validation error only — do not pass generic model preamble. */
+  validationNote?: string;
 }): string {
-  const bridge = "I need the 4-character carrier code.";
-  return [parts.preamble, bridge, parts.fieldPrompt, parts.followUp]
-    .filter(Boolean)
-    .join("\n\n");
+  return [parts.validationNote, parts.fieldPrompt].filter(Boolean).join("\n\n");
 }

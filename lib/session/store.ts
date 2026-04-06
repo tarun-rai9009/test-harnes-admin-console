@@ -37,6 +37,7 @@ export type AssistantSessionState = {
     | "none"
     | "need_code"
     | "pick_category"
+    | "multi_section_form"
     | "section_form"
     | "section_confirm";
   updatedAt: number;

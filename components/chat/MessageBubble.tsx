@@ -27,6 +27,10 @@ export function MessageBubble({
         ? "border-[color:var(--success-border)] bg-[color:var(--success-bg)] text-foreground shadow-[var(--card-shadow-sm)]"
         : "border-border bg-surface text-foreground shadow-[var(--card-shadow-sm)]";
 
+  if (!isUser && !message.content.trim()) {
+    return null;
+  }
+
   if (isUser) {
     return (
       <div className="flex justify-end">

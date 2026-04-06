@@ -2,9 +2,11 @@ import {
   type UpdateCategoryId,
   UPDATE_CATEGORY_FIELD_KEYS,
   UPDATE_CATEGORY_LABELS,
+  UPDATE_CATEGORY_ORDER,
 } from "@/lib/workflows/definitions/update-carrier-constants";
 import type {
   CarrierDetails,
+  UpdateCarrierBaseSection,
   UpdateCarrierPayload,
 } from "@/types/zinnia/carriers";
 
@@ -271,6 +273,107 @@ export function collectedParamsToUpdatePayload(
   }
 }
 
+function mergeBaseSections(
+  a?: UpdateCarrierBaseSection,
+  b?: UpdateCarrierBaseSection,
+): UpdateCarrierBaseSection | undefined {
+  if (!a && !b) return undefined;
+  const {
+    urls: aUrls,
+    identifiers: aId,
+    regulatory: aReg,
+    businessHolidays: aHol,
+    hoursOfOperation: aHrs,
+    productTypes: aPt,
+    ...aRest
+  } = a ?? {};
+  const {
+    urls: bUrls,
+    identifiers: bId,
+    regulatory: bReg,
+    businessHolidays: bHol,
+    hoursOfOperation: bHrs,
+    productTypes: bPt,
+    ...bRest
+  } = b ?? {};
+  const out: UpdateCarrierBaseSection = { ...aRest, ...bRest };
+  const urls = [...(aUrls ?? []), ...(bUrls ?? [])];
+  if (urls.length) out.urls = urls;
+  const identifiers = [...(aId ?? []), ...(bId ?? [])];
+  if (identifiers.length) out.identifiers = identifiers;
+  const regulatory = [...(aReg ?? []), ...(bReg ?? [])];
+  if (regulatory.length) out.regulatory = regulatory;
+  const businessHolidays = [...(aHol ?? []), ...(bHol ?? [])];
+  if (businessHolidays.length) out.businessHolidays = businessHolidays;
+  const hoursOfOperation = [...(aHrs ?? []), ...(bHrs ?? [])];
+  if (hoursOfOperation.length) out.hoursOfOperation = hoursOfOperation;
+  if (aPt?.length || bPt?.length) {
+    out.productTypes = [...(aPt ?? []), ...(bPt ?? [])];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Deep-merge partial PUT bodies from multiple section updates (single Zinnia PUT). */
+export function mergeUpdateCarrierPayloads(
+  a: UpdateCarrierPayload,
+  b: UpdateCarrierPayload,
+): UpdateCarrierPayload {
+  const out: UpdateCarrierPayload = {};
+  const base = mergeBaseSections(a.base, b.base);
+  if (base) out.base = base;
+
+  if (a.connectors || b.connectors) {
+    const dtccIds = [
+      ...(a.connectors?.dtccIds ?? []),
+      ...(b.connectors?.dtccIds ?? []),
+    ];
+    const c2c = [
+      ...(a.connectors?.c2cConnectedCarriers ?? []),
+      ...(b.connectors?.c2cConnectedCarriers ?? []),
+    ];
+    const conn: NonNullable<UpdateCarrierPayload["connectors"]> = {};
+    if (dtccIds.length) conn.dtccIds = dtccIds;
+    if (c2c.length) conn.c2cConnectedCarriers = c2c;
+    if (Object.keys(conn).length) out.connectors = conn;
+  }
+
+  const addresses = [...(a.addresses ?? []), ...(b.addresses ?? [])];
+  if (addresses.length) out.addresses = addresses;
+  const phones = [...(a.phones ?? []), ...(b.phones ?? [])];
+  if (phones.length) out.phones = phones;
+  const emails = [...(a.emails ?? []), ...(b.emails ?? [])];
+  if (emails.length) out.emails = emails;
+
+  return out;
+}
+
+/** Build one PUT body from collected flat params when multiple sections were edited. */
+export function mergeCollectedParamsToUpdatePayload(
+  data: Record<string, unknown>,
+  categories: UpdateCategoryId[],
+): UpdateCarrierPayload {
+  return categories.reduce<UpdateCarrierPayload>((acc, cat) => {
+    const partial = collectedParamsToUpdatePayload({
+      ...data,
+      updateCategory: cat,
+    });
+    return mergeUpdateCarrierPayloads(acc, partial);
+  }, {});
+}
+
+export function stripMultiCategoryKeysFromCollected(
+  data: Record<string, unknown>,
+  categories: UpdateCategoryId[],
+): Record<string, unknown> {
+  let next: Record<string, unknown> = { ...data };
+  for (const cat of categories) {
+    next = stripUpdateCategoryKeysFromCollected(next, cat);
+  }
+  delete next.selectedUpdateCategories;
+  delete next.updateCategory;
+  return next;
+}
+
 export function updatePayloadHasBody(p: UpdateCarrierPayload): boolean {
   if (p.base && Object.keys(p.base).length) return true;
   if (p.connectors && Object.keys(p.connectors).length) return true;
@@ -336,10 +439,46 @@ export function buildUpdateConfirmationRowsFromData(
   return rows;
 }
 
+/** Confirmation table when multiple sections are updated in one save. */
+export function buildUpdateConfirmationRowsFromMultiCategoryData(
+  data: Record<string, unknown>,
+  categories: UpdateCategoryId[],
+): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const code = data.carrierCode;
+  if (code != null && String(code).trim() !== "") {
+    rows.push({ label: "Carrier code", value: String(code).toUpperCase() });
+  }
+  rows.push({
+    label: "Sections",
+    value: categories.map((c) => UPDATE_CATEGORY_LABELS[c]).join(", "),
+  });
+
+  for (const cat of categories) {
+    const keys = UPDATE_CATEGORY_FIELD_KEYS[cat];
+    for (const key of keys) {
+      if (!isUpdateValueProvided(data[key])) continue;
+      const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
+      const v = data[key];
+      let display: string;
+      if (Array.isArray(v)) display = v.join(", ");
+      else if (typeof v === "boolean") display = v ? "Yes" : "No";
+      else if (v === "Y" || v === "N") display = v === "Y" ? "Yes" : "No";
+      else display = String(v);
+      rows.push({ label, value: display });
+    }
+  }
+  return rows;
+}
+
 /**
  * Success card: carrier identity from the API response plus only the section
  * and field values that were submitted in this update.
  */
+function isUpdateCategoryIdString(s: string): s is UpdateCategoryId {
+  return (UPDATE_CATEGORY_ORDER as readonly string[]).includes(s);
+}
+
 export function buildUpdateSuccessSummaryCardFields(
   apiResult: CarrierDetails,
   submittedData: Record<string, unknown>,
@@ -352,6 +491,34 @@ export function buildUpdateSuccessSummaryCardFields(
     value: code ? code.toUpperCase() : "—",
   });
   rows.push({ label: "Carrier name", value: name || "—" });
+
+  const multi = submittedData.selectedUpdateCategories;
+  if (Array.isArray(multi) && multi.length > 0) {
+    const cats = multi.filter(
+      (c): c is UpdateCategoryId =>
+        typeof c === "string" && isUpdateCategoryIdString(c),
+    );
+    if (cats.length > 0) {
+      rows.push({
+        label: "Sections updated",
+        value: cats.map((c) => UPDATE_CATEGORY_LABELS[c]).join(", "),
+      });
+      for (const cat of cats) {
+        for (const key of UPDATE_CATEGORY_FIELD_KEYS[cat]) {
+          if (!isUpdateValueProvided(submittedData[key])) continue;
+          const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
+          const v = submittedData[key];
+          let display: string;
+          if (Array.isArray(v)) display = v.join(", ");
+          else if (typeof v === "boolean") display = v ? "Yes" : "No";
+          else if (v === "Y" || v === "N") display = v === "Y" ? "Yes" : "No";
+          else display = String(v);
+          rows.push({ label, value: display });
+        }
+      }
+      return rows;
+    }
+  }
 
   const cat = submittedData.updateCategory;
   if (typeof cat === "string" && UPDATE_CATEGORY_LABELS[cat as UpdateCategoryId]) {

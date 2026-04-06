@@ -12,6 +12,9 @@ export const listCarriersWorkflow: WorkflowDefinition = {
   buildPayload: () => ({}),
   execute: async () => getAllCarriers(),
   formatSuccess: (result) => {
+    const continueMainMenu = {
+      actions: [{ label: "Continue", message: "next" }],
+    };
     const list = result as CarrierSummary[];
     const n = list.length;
     const MAX_ROWS = 50;
@@ -19,6 +22,7 @@ export const listCarriersWorkflow: WorkflowDefinition = {
       return {
         message: "No carriers on file.",
         summaryLines: [],
+        ...continueMainMenu,
       };
     }
     const slice = list.slice(0, MAX_ROWS);
@@ -34,6 +38,7 @@ export const listCarriersWorkflow: WorkflowDefinition = {
     return {
       message,
       summaryTable: table,
+      ...continueMainMenu,
     };
   },
 };

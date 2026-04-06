@@ -22,6 +22,7 @@ export async function POST(request: Request) {
     createCarrierDraftForm,
     updateCarrierCode,
     updateCarrierCategoryId,
+    updateCarrierCategoryIds,
     updateCarrierSectionForm,
     updateCarrierNavigate,
   } = body as ChatApiRequestBody;
@@ -67,6 +68,22 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (updateCarrierCategoryIds !== undefined && updateCarrierCategoryIds !== null) {
+    if (!Array.isArray(updateCarrierCategoryIds)) {
+      return NextResponse.json(
+        { error: "updateCarrierCategoryIds must be an array when provided" },
+        { status: 400 },
+      );
+    }
+    for (const id of updateCarrierCategoryIds) {
+      if (typeof id !== "string") {
+        return NextResponse.json(
+          { error: "updateCarrierCategoryIds must be an array of strings" },
+          { status: 400 },
+        );
+      }
+    }
+  }
   if (
     updateCarrierSectionForm !== undefined &&
     updateCarrierSectionForm !== null &&
@@ -97,6 +114,7 @@ export async function POST(request: Request) {
       createCarrierDraftForm,
       updateCarrierCode,
       updateCarrierCategoryId,
+      updateCarrierCategoryIds,
       updateCarrierSectionForm,
       updateCarrierNavigate,
     });

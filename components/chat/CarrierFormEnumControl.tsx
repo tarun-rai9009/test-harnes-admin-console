@@ -42,40 +42,44 @@ export function CarrierFormEnumControl({
     const selected = value
       ? value.split(",").map((s) => s.trim()).filter(Boolean)
       : [];
-    const size = Math.min(8, Math.max(3, opts.length));
-    const multiHint = `${id}-multi-hint`;
-    const describedBy =
-      [invalid && errorDescribedBy, multiHint].filter(Boolean).join(" ") ||
-      undefined;
+    const describedBy = invalid && errorDescribedBy ? errorDescribedBy : undefined;
+    const containerClass = `${baseInput} ${border} flex flex-wrap items-center gap-x-5 gap-y-3 py-2.5 min-h-[42px] h-auto`;
+
     return (
-      <div>
-        <select
-          id={id}
-          name={field.key}
-          multiple
-          size={size}
-          disabled={disabled}
-          value={selected}
-          onChange={(e) => {
-            const next = Array.from(
-              e.target.selectedOptions,
-              (o) => o.value,
-            );
-            onChange(next.join(", "));
-          }}
-          className={`${baseInput} ${border} min-h-[6.5rem] py-1`}
-          aria-invalid={invalid}
-          aria-describedby={describedBy}
-        >
-          {opts.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <p id={multiHint} className="mt-1 text-xs text-accent-muted">
-          Hold Ctrl (Windows) or ⌘ (Mac) to select multiple.
-        </p>
+      <div
+        id={id}
+        className={containerClass}
+        aria-invalid={invalid}
+        aria-describedby={describedBy}
+      >
+        {opts.map((o) => {
+          const isChecked = selected.includes(o.value);
+          return (
+            <label
+              key={o.value}
+              className="flex items-center gap-3 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                name={field.key}
+                value={o.value}
+                disabled={disabled}
+                checked={isChecked}
+                onChange={(e) => {
+                  let nextSelected;
+                  if (e.target.checked) {
+                    nextSelected = [...selected, o.value];
+                  } else {
+                    nextSelected = selected.filter((v) => v !== o.value);
+                  }
+                  onChange(nextSelected.join(", "));
+                }}
+                className="h-4 w-4 rounded border-border text-[color:var(--primary)] focus:ring-[color:var(--primary)]"
+              />
+              <span className="text-sm text-foreground/90">{o.label}</span>
+            </label>
+          );
+        })}
       </div>
     );
   }

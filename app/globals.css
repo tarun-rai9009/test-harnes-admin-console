@@ -92,6 +92,23 @@ body {
     @apply rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50;
   }
 
+  /** Main chat task menu (greeting) — orange accent strip; left-aligned like chat bubbles */
+  .ui-chat-main-menu-btn {
+    @apply w-full rounded-lg border border-border px-4 py-2.5 text-center text-sm font-semibold leading-snug text-foreground shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50;
+    border-left-width: 3px;
+    border-left-color: var(--accent);
+    background-color: var(--accent-subtle);
+  }
+
+  .ui-chat-main-menu-btn:hover:not(:disabled) {
+    background-color: rgba(234, 88, 12, 0.14);
+  }
+
+  /** Outer shell: ~half column max width, left-aligned like chat (use with self-start in flex parents) */
+  .ui-chat-main-menu-card {
+    @apply w-full max-w-[50%] max-sm:max-w-full rounded-xl border border-border bg-surface px-4 py-4 text-left shadow-[var(--card-shadow-sm)];
+  }
+
   .ui-btn-ghost {
     @apply text-sm font-semibold text-accent underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50;
   }

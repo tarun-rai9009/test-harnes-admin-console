@@ -1,11 +1,15 @@
 import { updateCarrier } from "@/lib/zinnia/carriers";
 import type { CarrierDetails } from "@/types/zinnia/carriers";
 import { UPDATE_CARRIER_FIELD_GROUPS } from "@/lib/workflows/definitions/update-carrier-catalog";
+import type { UpdateCategoryId } from "@/lib/workflows/definitions/update-carrier-constants";
 import {
   buildUpdateConfirmationRowsFromData,
+  buildUpdateConfirmationRowsFromMultiCategoryData,
   collectedParamsToUpdatePayload,
+  mergeCollectedParamsToUpdatePayload,
   updatePayloadHasBody,
 } from "@/lib/workflows/definitions/update-carrier-payload";
+import { isUpdateCategoryId } from "@/lib/workflows/update-carrier-section-form";
 import type { WorkflowDefinition } from "@/lib/workflows/workflow-types";
 
 function buildUpdateConfirmationMessage(): string {
@@ -22,8 +26,34 @@ export const updateCarrierWorkflow: WorkflowDefinition = {
   optionalFields: [],
   fieldGroups: UPDATE_CARRIER_FIELD_GROUPS,
   buildConfirmationMessage: () => buildUpdateConfirmationMessage(),
-  getConfirmationSummaryRows: (data) => buildUpdateConfirmationRowsFromData(data),
+  getConfirmationSummaryRows: (data) => {
+    const raw = data.selectedUpdateCategories;
+    if (Array.isArray(raw) && raw.length > 0) {
+      const cats = raw.filter(
+        (c): c is UpdateCategoryId =>
+          typeof c === "string" && isUpdateCategoryId(c),
+      );
+      if (cats.length > 0) {
+        return buildUpdateConfirmationRowsFromMultiCategoryData(data, cats);
+      }
+    }
+    return buildUpdateConfirmationRowsFromData(data);
+  },
   buildPayload: (data) => {
+    const raw = data.selectedUpdateCategories;
+    if (Array.isArray(raw) && raw.length > 0) {
+      const cats = raw.filter(
+        (c): c is UpdateCategoryId =>
+          typeof c === "string" && isUpdateCategoryId(c),
+      );
+      if (cats.length > 0) {
+        const putPayload = mergeCollectedParamsToUpdatePayload(data, cats);
+        return {
+          carrierCode: data.carrierCode as string,
+          putPayload,
+        };
+      }
+    }
     const putPayload = collectedParamsToUpdatePayload(data);
     return {
       carrierCode: data.carrierCode as string,
@@ -51,6 +81,7 @@ export const updateCarrierWorkflow: WorkflowDefinition = {
         { label: "Carrier code", value: code || "—" },
         { label: "Carrier name", value: name },
       ],
+      actions: [{ label: "Continue", message: "next" }],
     };
   },
 };
