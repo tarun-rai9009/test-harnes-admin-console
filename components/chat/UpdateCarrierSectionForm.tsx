@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  CarrierFormEnumControl,
+  carrierFieldUsesEnumControl,
+} from "@/components/chat/CarrierFormEnumControl";
 import type { UpdateCarrierSectionFormState } from "@/types/chat-assistant";
 import {
   validateAndMergeUpdateCarrierSection,
@@ -111,7 +115,19 @@ export function UpdateCarrierSectionForm({
                   {f.required ? "Required" : "Optional"}
                 </span>
               </div>
-              {f.multiline ? (
+              {carrierFieldUsesEnumControl(f) ? (
+                <CarrierFormEnumControl
+                  field={f}
+                  idPrefix="upd"
+                  value={values[f.key] ?? ""}
+                  onChange={(v) => setField(f.key, v)}
+                  disabled={disabled}
+                  invalid={invalid}
+                  errorDescribedBy={
+                    invalid ? `upd-err-${f.key}` : undefined
+                  }
+                />
+              ) : f.multiline ? (
                 <textarea
                   id={`upd-${f.key}`}
                   name={f.key}

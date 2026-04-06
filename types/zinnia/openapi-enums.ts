@@ -1,42 +1,18 @@
 /**
- * Enum values from project `openapi.yaml` (CreateCarrierDraftRequest + path params).
- * Keep in sync when regenerating from OpenAPI.
+ * Enum values from `openapi.yaml` — sourced from generated `OPENAPI_ENUMS`.
+ * Regenerate enums: `npm run generate:openapi-enums`
  */
 
-export const ENTITY_TYPE_VALUES = [
-  "Sole Proprietorship",
-  "General Partnership",
-  "Limited Partnership",
-  "C Corporation",
-  "S Corporation",
-  "Limited Liability Company",
-  "Charitable Organization",
-  "E State",
-  "Trust",
-  "Corporation",
-  "Insurance Company",
-  "Unknown",
-] as const;
+import {
+  OPENAPI_ENUMS,
+  type OpenApiEnumSchemaName,
+} from "@/types/zinnia/generated/openapi-enums";
 
-export const LINE_OF_BUSINESS_VALUES = [
-  "Life",
-  "Annuity",
-  "Health",
-  "P&C",
-  "Disability",
-  "Long Term Care",
-  "Retirement",
-  "Worksite Benefits",
-  "Other",
-] as const;
+export { OPENAPI_ENUMS, type OpenApiEnumSchemaName };
 
-export const PRODUCT_TYPE_VALUES = [
-  "Term Life",
-  "Whole Life",
-  "Universal Life",
-  "Variable Annuity",
-  "Fixed Annuity",
-] as const;
+export const ENTITY_TYPE_VALUES = OPENAPI_ENUMS.EntityTypeEnum;
+export const LINE_OF_BUSINESS_VALUES = OPENAPI_ENUMS.LineOfBusinessEnum;
+export const PRODUCT_TYPE_VALUES = OPENAPI_ENUMS.ProductTypeEnum;
 
 export type EntityTypeEnum = (typeof ENTITY_TYPE_VALUES)[number];
 export type LineOfBusinessEnum = (typeof LINE_OF_BUSINESS_VALUES)[number];

@@ -5,6 +5,7 @@
 import type {
   CreateCarrierDraftFormState,
 } from "@/types/chat-assistant";
+import { enumFieldMetaForKey } from "@/lib/workflows/carrier-form-enum-ui";
 import type { CreateCarrierDraftPayload } from "@/types/zinnia/carriers";
 import { trimString } from "@/lib/workflows/validators";
 
@@ -89,12 +90,16 @@ export function buildCreateCarrierDraftFormState(
   errors: Record<string, string>,
   formLevelError?: string,
 ): CreateCarrierDraftFormState {
-  const fields = FIELD_ORDER.map((key) => ({
-    key,
-    label: SUMMARY_LABELS[key],
-    required: REQUIRED_SET.has(key),
-    multiline: key === "productTypes",
-  }));
+  const fields = FIELD_ORDER.map((key) => {
+    const meta = enumFieldMetaForKey(key);
+    return {
+      key,
+      label: SUMMARY_LABELS[key],
+      required: REQUIRED_SET.has(key),
+      multiline: false,
+      ...(meta ?? {}),
+    };
+  });
   const values: Record<string, string> = {};
   for (const key of FIELD_ORDER) {
     const v = merged[key];

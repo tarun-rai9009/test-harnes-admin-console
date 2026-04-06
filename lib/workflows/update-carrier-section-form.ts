@@ -8,14 +8,20 @@ import {
 import {
   updateCarrierHasCategoryChanges,
 } from "@/lib/workflows/definitions/update-carrier-payload";
+import { mergeEnumFieldMeta } from "@/lib/workflows/carrier-form-enum-ui";
 import { getUpdateCarrierNoChangesMessage } from "@/lib/workflows/definitions/update-carrier-catalog";
 import { getOpenApiUpdateSectionRequirementErrors } from "@/lib/workflows/update-carrier-openapi-requirements";
 import type { WorkflowFieldDefinition } from "@/lib/workflows/workflow-types";
-import type { UpdateCarrierSectionFormState } from "@/types/chat-assistant";
+import type {
+  CreateCarrierDraftFormField,
+  UpdateCarrierSectionFormState,
+} from "@/types/chat-assistant";
 
-const MULTILINE_KEYS = new Set([
-  "basic_productTypes",
-  "reg_authorizedJurisdictionStates",
+const MULTILINE_KEYS = new Set(["reg_authorizedJurisdictionStates"]);
+
+const YN_ENUM_FORM_KEYS = new Set([
+  "reg_isC2CRplParticipant",
+  "reg_use1035YP",
 ]);
 
 export function isUpdateCategoryId(s: string): s is UpdateCategoryId {
@@ -38,12 +44,7 @@ export function getFieldDefsForUpdateCategory(
   return g?.optionalFields ?? [];
 }
 
-export type UpdateCarrierSectionFormField = {
-  key: string;
-  label: string;
-  required: boolean;
-  multiline?: boolean;
-};
+export type UpdateCarrierSectionFormField = CreateCarrierDraftFormField;
 
 /** Build form state from raw strings (e.g. after failed validation — preserve user input). */
 export function buildUpdateSectionFormStateFromStrings(
@@ -63,12 +64,13 @@ export function buildUpdateSectionFormStateFromStrings(
 export function buildUpdateCarrierSectionFormFields(
   categoryId: UpdateCategoryId,
 ): UpdateCarrierSectionFormField[] {
-  return getFieldDefsForUpdateCategory(categoryId).map((d) => ({
+  const raw = getFieldDefsForUpdateCategory(categoryId).map((d) => ({
     key: d.key,
     label: d.summaryLabel ?? d.key,
     required: d.required,
     multiline: MULTILINE_KEYS.has(d.key),
   }));
+  return mergeEnumFieldMeta(raw);
 }
 
 export function stringValuesForUpdateSection(
@@ -84,7 +86,7 @@ export function stringValuesForUpdateSection(
       continue;
     }
     if (typeof v === "boolean") {
-      out[k] = v ? "yes" : "no";
+      out[k] = YN_ENUM_FORM_KEYS.has(k) ? (v ? "Y" : "N") : v ? "yes" : "no";
     } else if (Array.isArray(v)) {
       out[k] = v.join(", ");
     } else {

@@ -1,4 +1,6 @@
 import type { FieldValidationResult } from "@/lib/workflows/workflow-types";
+import type { OpenApiEnumSchemaName } from "@/types/zinnia/generated/openapi-enums";
+import { OPENAPI_ENUMS } from "@/types/zinnia/generated/openapi-enums";
 import {
   ENTITY_TYPE_VALUES,
   LINE_OF_BUSINESS_VALUES,
@@ -269,6 +271,50 @@ export function validateOptionalYesNo(fieldLabel: string) {
     return {
       ok: false,
       error: `${fieldLabel}: yes, no, or **skip**.`,
+    };
+  };
+}
+
+/**
+ * Y/N dropdown (OpenAPI YnEnum) or legacy yes/no text; skip → omitted; merged as boolean.
+ */
+export function validateOptionalYnEnum(fieldLabel: string) {
+  return (raw: unknown): FieldValidationResult => {
+    const s = trimString(raw);
+    if (!s || SKIP_TOKENS.has(s.toLowerCase())) {
+      return { ok: true, normalized: "" };
+    }
+    if (s === "Y" || /^(yes|y|yeah|true|1)$/i.test(s)) {
+      return { ok: true, normalized: true };
+    }
+    if (s === "N" || /^(no|n|nope|false|0)$/i.test(s)) {
+      return { ok: true, normalized: false };
+    }
+    return {
+      ok: false,
+      error: `${fieldLabel}: choose Yes, No, or **skip**.`,
+    };
+  };
+}
+
+/** Optional field — value must match generated OpenAPI enum list if non-empty. */
+export function validateOptionalOpenApiEnum(
+  schema: OpenApiEnumSchemaName,
+  fieldLabel: string,
+) {
+  const list = OPENAPI_ENUMS[schema] as readonly string[];
+  const allowed = new Set<string>(list);
+  return (raw: unknown): FieldValidationResult => {
+    const s = trimString(raw);
+    if (!s || SKIP_TOKENS.has(s.toLowerCase())) {
+      return { ok: true, normalized: "" };
+    }
+    if (allowed.has(s)) return { ok: true, normalized: s };
+    const ci = list.find((v) => v.toLowerCase() === s.toLowerCase());
+    if (ci) return { ok: true, normalized: ci };
+    return {
+      ok: false,
+      error: `${fieldLabel} must match an allowed value or **skip**.`,
     };
   };
 }

@@ -26,12 +26,18 @@ export type ChatSummaryCard = {
   table?: ChatSummaryTable;
 };
 
+export type FormFieldSelectOption = { value: string; label: string };
+
 export type CreateCarrierDraftFormField = {
   key: string;
   label: string;
   required: boolean;
-  /** Use a taller input (e.g. comma-separated list) */
+  /** Use a taller input (free text only; not used when enumOptions is set). */
   multiline?: boolean;
+  /** From OpenAPI enum — render as `<select>`. */
+  enumOptions?: FormFieldSelectOption[];
+  /** Multi-value enum (e.g. product types); comma-separated in `values`. */
+  selectMultiple?: boolean;
 };
 
 /** Shown when create-draft validation fails or user is correcting fields before save. */

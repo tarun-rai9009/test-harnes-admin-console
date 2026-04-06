@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  CarrierFormEnumControl,
+  carrierFieldUsesEnumControl,
+} from "@/components/chat/CarrierFormEnumControl";
 import type { CreateCarrierDraftFormState } from "@/types/chat-assistant";
 import { validateCreateCarrierDraftFormValues } from "@/lib/workflows/create-carrier-draft-validate";
 import { useCallback, useEffect, useState } from "react";
@@ -97,7 +101,17 @@ export function CreateCarrierDraftForm({
                   {f.required ? "Required" : "Optional"}
                 </span>
               </div>
-              {f.multiline ? (
+              {carrierFieldUsesEnumControl(f) ? (
+                <CarrierFormEnumControl
+                  field={f}
+                  idPrefix="draft"
+                  value={values[f.key] ?? ""}
+                  onChange={(v) => setField(f.key, v)}
+                  disabled={disabled}
+                  invalid={invalid}
+                  errorDescribedBy={invalid ? `err-${f.key}` : undefined}
+                />
+              ) : f.multiline ? (
                 <textarea
                   id={`draft-${f.key}`}
                   name={f.key}

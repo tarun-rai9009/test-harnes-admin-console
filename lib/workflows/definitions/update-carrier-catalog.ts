@@ -5,10 +5,11 @@ import type {
 import {
   trimString,
   validateCarrierCode,
-  validateOptionalProductTypes,
+  validateOptionalOpenApiEnum,
+  validateOptionalProductTypesOpenApi,
   validateOptionalString,
   validateOptionalYear,
-  validateOptionalYesNo,
+  validateOptionalYnEnum,
 } from "@/lib/workflows/validators";
 import {
   type UpdateCategoryId,
@@ -183,6 +184,7 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "basic_entityType",
         "Entity type",
         "Entity type?",
+        validateOptionalOpenApiEnum("EntityTypeEnum", "Entity type"),
       ),
       opt(
         "basic_carrierName",
@@ -193,12 +195,13 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "basic_lineOfBusiness",
         "Line of business",
         "Line of business?",
+        validateOptionalOpenApiEnum("LineOfBusinessEnum", "Line of business"),
       ),
       opt(
         "basic_productTypes",
         "Product types",
         "Product types (comma-separated)?",
-        validateOptionalProductTypes(),
+        validateOptionalProductTypesOpenApi(),
       ),
     ],
   },
@@ -275,6 +278,7 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "id_identifierType",
         "Identifier type",
         "Identifier type (e.g. NAIC)?",
+        validateOptionalOpenApiEnum("IdentifierTypeEnum", "Identifier type"),
       ),
       opt(
         "id_identifierValue",
@@ -298,6 +302,7 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "reg_lineOfBusiness",
         "Regulatory line of business",
         "Regulatory LOB?",
+        validateOptionalOpenApiEnum("LineOfBusinessEnum", "Regulatory line of business"),
       ),
       opt(
         "reg_authorizedJurisdictionStates",
@@ -308,23 +313,25 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "reg_rating",
         "Rating",
         "Rating?",
+        validateOptionalOpenApiEnum("RatingEnum", "Rating"),
       ),
       opt(
         "reg_tpaNonTpa",
         "TPA / non-TPA",
         "TPA detail?",
+        validateOptionalOpenApiEnum("TpaNonTpaEnum", "TPA / non-TPA"),
       ),
       opt(
         "reg_isC2CRplParticipant",
         "C2C RPL participant",
         "C2C RPL participant? (yes/no/**skip**)",
-        validateOptionalYesNo("C2C RPL participation"),
+        validateOptionalYnEnum("C2C RPL participation"),
       ),
       opt(
         "reg_use1035YP",
         "1035 YP",
         "1035 YP? (yes/no/**skip**)",
-        validateOptionalYesNo("1035 YP"),
+        validateOptionalYnEnum("1035 YP"),
       ),
     ],
   },
@@ -342,6 +349,7 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "hol_holidayType",
         "Holiday type",
         "Holiday type?",
+        validateOptionalOpenApiEnum("HolidayTypeEnum", "Holiday type"),
       ),
       opt(
         "hol_dateOrOccurrence",
@@ -413,6 +421,7 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "addr_addressType",
         "Address type",
         "Address type?",
+        validateOptionalOpenApiEnum("AddressTypeEnum", "Address type"),
       ),
       opt("addr_addressLine1", "Address line 1", "Line 1?"),
       opt("addr_addressLine2", "Address line 2", "Line 2?"),
@@ -425,7 +434,12 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
         "ZIP extension",
         "ZIP+4?",
       ),
-      opt("addr_addressCountry", "Country", "Country?"),
+      opt(
+        "addr_addressCountry",
+        "Country",
+        "Country?",
+        validateOptionalOpenApiEnum("CountryCodeEnum", "Country"),
+      ),
       opt(
         "addr_addressEffectiveDate",
         "Effective date",
@@ -439,7 +453,12 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
     isActive: (d) => d.updateCategory === "phones",
     requiredFields: [],
     optionalFields: [
-      opt("phone_phoneType", "Phone type", "Phone type?"),
+      opt(
+        "phone_phoneType",
+        "Phone type",
+        "Phone type?",
+        validateOptionalOpenApiEnum("PhoneTypeEnum", "Phone type"),
+      ),
       opt(
         "phone_countryCode",
         "Country code",
@@ -465,7 +484,12 @@ export const UPDATE_CARRIER_FIELD_GROUPS: WorkflowFieldGroupDefinition[] = [
     isActive: (d) => d.updateCategory === "emails",
     requiredFields: [],
     optionalFields: [
-      opt("em_emailType", "Email type", "Email type?"),
+      opt(
+        "em_emailType",
+        "Email type",
+        "Email type?",
+        validateOptionalOpenApiEnum("EmailTypeEnum", "Email type"),
+      ),
       opt(
         "em_emailAddress",
         "Email address",
