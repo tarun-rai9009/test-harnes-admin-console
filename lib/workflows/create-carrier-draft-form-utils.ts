@@ -4,7 +4,7 @@
 
 import type {
   CreateCarrierDraftFormState,
-} from "@/types/chat-assistant";
+} from "@/types/carrier-forms";
 import { enumFieldMetaForKey } from "@/lib/workflows/carrier-form-enum-ui";
 import type { CreateCarrierDraftPayload } from "@/types/zinnia/carriers";
 import { trimString } from "@/lib/workflows/validators";

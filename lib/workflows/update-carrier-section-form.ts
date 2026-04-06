@@ -15,7 +15,7 @@ import type { WorkflowFieldDefinition } from "@/lib/workflows/workflow-types";
 import type {
   CreateCarrierDraftFormField,
   UpdateCarrierSectionFormState,
-} from "@/types/chat-assistant";
+} from "@/types/carrier-forms";
 
 const MULTILINE_KEYS = new Set(["reg_authorizedJurisdictionStates"]);
 

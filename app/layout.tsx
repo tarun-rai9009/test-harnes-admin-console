@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: CHAT_AGENT_TITLE,
+  title: `${CHAT_AGENT_TITLE} — Test harness`,
   description:
-    "Admin console chat for carrier setup, lookups, lists, reference data, and updates.",
+    "Admin test harness for carrier create, lookup, list, and section updates via Zinnia APIs.",
 };
 
 export default function RootLayout({

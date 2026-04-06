@@ -3,7 +3,7 @@
  */
 
 import { CARRIER_FORM_FIELD_ENUM } from "@/lib/workflows/carrier-form-enum-bindings";
-import type { CreateCarrierDraftFormField } from "@/types/chat-assistant";
+import type { CreateCarrierDraftFormField } from "@/types/carrier-forms";
 import { OPENAPI_ENUMS } from "@/types/zinnia/generated/openapi-enums";
 
 export type EnumSelectOption = { value: string; label: string };
