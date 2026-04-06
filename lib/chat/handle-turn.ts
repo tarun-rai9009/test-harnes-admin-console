@@ -2,6 +2,7 @@ import "server-only";
 
 import { CHAT_AGENT_TITLE } from "@/lib/branding";
 import { analyzeUserUtterance } from "@/lib/ai/analyze";
+import { textSuggestsCreateCarrierDraft } from "@/lib/ai/heuristics";
 import { mapAiIntentToWorkflowId } from "@/lib/ai/intent-map";
 import type { ExtractedFields, IntentAnalysisResult } from "@/lib/ai/types";
 import {
@@ -135,6 +136,9 @@ function heuristicWorkflowId(text: string): string | null {
     /\bcarrier\b[\s\S]{0,40}\b(update|change)\b/.test(t)
   ) {
     return "update_carrier";
+  }
+  if (textSuggestsCreateCarrierDraft(text)) {
+    return "create_carrier_draft";
   }
   return null;
 }

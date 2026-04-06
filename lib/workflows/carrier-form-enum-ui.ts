@@ -25,19 +25,26 @@ export function optionsForOpenApiEnumSchema(
 
 export function enumFieldMetaForKey(key: string): Pick<
   CreateCarrierDraftFormField,
-  "enumOptions" | "selectMultiple"
+  "enumOptions" | "selectMultiple" | "enumCheckboxGroup"
 > | null {
   const binding = CARRIER_FORM_FIELD_ENUM[key];
   if (!binding) return null;
+  const multi = binding.mode === "multi";
+  const checkboxes = Boolean(multi && binding.multiAsCheckboxes);
   return {
     enumOptions: optionsForOpenApiEnumSchema(binding.schema),
-    selectMultiple: binding.mode === "multi",
+    selectMultiple: multi && !checkboxes,
+    enumCheckboxGroup: checkboxes,
   };
 }
 
 export function mergeEnumFieldMeta<
   T extends { key: string; label: string; required: boolean; multiline?: boolean },
->(fields: T[]): (T & Pick<CreateCarrierDraftFormField, "enumOptions" | "selectMultiple">)[] {
+>(fields: T[]): (T &
+  Pick<
+    CreateCarrierDraftFormField,
+    "enumOptions" | "selectMultiple" | "enumCheckboxGroup"
+  >)[] {
   return fields.map((f) => {
     const meta = enumFieldMetaForKey(f.key);
     if (!meta) return { ...f };
