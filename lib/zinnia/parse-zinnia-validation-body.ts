@@ -35,6 +35,13 @@ function firstStringMessage(v: unknown): string | undefined {
 export type ZinniaErrorParseOptions = {
   /** Map API `field` paths (e.g. base.regulatory[0].rating) onto allowed form keys. */
   resolveAllowedKey?: (apiFieldPath: string) => string | undefined;
+  /**
+   * When set, paths like `base.identifiers[1].identifierValue` are bucketed by row
+   * instead of collapsing to a single flat key.
+   */
+  resolveMultiEntryRowField?: (
+    apiFieldPath: string,
+  ) => { rowIndex: number; formKey: string } | undefined;
 };
 
 function validationIssueStrings(root: unknown): string[] {
@@ -54,8 +61,13 @@ export function parseZinniaErrorBodyForAllowedKeys(
   bodyText: string,
   allowed: Set<string>,
   options?: ZinniaErrorParseOptions,
-): { fieldErrors: Record<string, string>; formLevelMessage?: string } {
+): {
+  fieldErrors: Record<string, string>;
+  formLevelMessage?: string;
+  rowFieldErrors?: Record<number, Record<string, string>>;
+} {
   const fieldErrors: Record<string, string> = {};
+  const rowFieldErrors: Record<number, Record<string, string>> = {};
   const trimmed = bodyText.trim();
 
   const tryParse = (): unknown => {
@@ -70,8 +82,18 @@ export function parseZinniaErrorBodyForAllowedKeys(
   const visited = new WeakSet<object>();
 
   const resolveAllowedKey = options?.resolveAllowedKey;
+  const resolveMultiEntryRowField = options?.resolveMultiEntryRowField;
 
   const assignField = (apiPath: string, message: string) => {
+    const multi = resolveMultiEntryRowField?.(apiPath);
+    if (multi !== undefined && allowed.has(multi.formKey)) {
+      if (!rowFieldErrors[multi.rowIndex]) rowFieldErrors[multi.rowIndex] = {};
+      if (!rowFieldErrors[multi.rowIndex][multi.formKey]) {
+        rowFieldErrors[multi.rowIndex][multi.formKey] = message;
+      }
+      return;
+    }
+
     const mapped = resolveAllowedKey?.(apiPath);
     const candidates = [mapped, leafKey(apiPath)].filter(
       (x): x is string => typeof x === "string" && x.length > 0,
@@ -204,7 +226,10 @@ export function parseZinniaErrorBodyForAllowedKeys(
         : issuesList.slice(0, 4).join(" · ");
   }
 
-  return { fieldErrors, formLevelMessage };
+  const rowFieldErrorsOut =
+    Object.keys(rowFieldErrors).length > 0 ? rowFieldErrors : undefined;
+
+  return { fieldErrors, formLevelMessage, rowFieldErrors: rowFieldErrorsOut };
 }
 
 /** Top-level `errors[].issue` strings from a Zinnia ValidationErrorResponse body. */

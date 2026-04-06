@@ -159,6 +159,7 @@ export async function PUT(
         {
           ok: false as const,
           fieldErrors: p.fieldErrors,
+          ...(p.rowFieldErrors ? { rowFieldErrors: p.rowFieldErrors } : {}),
           formLevelMessage:
             p.formLevelMessage ??
             formatChatWorkflowError(e, defForErr, data),

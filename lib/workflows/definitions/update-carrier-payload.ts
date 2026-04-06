@@ -5,8 +5,17 @@ import {
 } from "@/lib/workflows/definitions/update-carrier-constants";
 import type {
   CarrierDetails,
+  UpdateCarrierBaseIdentifiers,
   UpdateCarrierPayload,
 } from "@/types/zinnia/carriers";
+import {
+  isMultiEntryCategory,
+  ME_PENDING_ROWS_KEY,
+  ME_PUT_KEY,
+  ME_SNAPSHOT_KEY,
+  type MultiEntryCategoryId,
+} from "@/lib/workflows/update-multi-entry-keys";
+import { snapshotRowToFlatStrings } from "@/lib/workflows/update-multi-entry-section";
 
 /** After saving one section, drop its fields so the next category starts clean. */
 export function stripUpdateCategoryKeysFromCollected(
@@ -18,6 +27,11 @@ export function stripUpdateCategoryKeysFromCollected(
     delete next[k];
   }
   delete next.updateCategory;
+  if (isMultiEntryCategory(categoryId)) {
+    delete next[ME_SNAPSHOT_KEY[categoryId]];
+    delete next[ME_PUT_KEY[categoryId]];
+    delete next[ME_PENDING_ROWS_KEY];
+  }
   return next;
 }
 
@@ -173,6 +187,14 @@ export function collectedParamsToUpdatePayload(
       return { base: { urls: [row] } };
     }
     case "identifiers": {
+      const putId = data[ME_PUT_KEY.identifiers];
+      if (Array.isArray(putId) && putId.length > 0) {
+        return {
+          base: {
+            identifiers: putId as UpdateCarrierBaseIdentifiers[],
+          },
+        };
+      }
       const row = pickDefined({
         identifierType: str(data, "id_identifierType"),
         identifierValue: str(data, "id_identifierValue"),
@@ -227,6 +249,10 @@ export function collectedParamsToUpdatePayload(
       return Object.keys(connectors).length ? { connectors } : {};
     }
     case "addresses": {
+      const putA = data[ME_PUT_KEY.addresses];
+      if (Array.isArray(putA) && putA.length > 0) {
+        return { addresses: putA as UpdateCarrierPayload["addresses"] };
+      }
       const row = pickDefined({
         addressType: str(data, "addr_addressType"),
         addressLine1: str(data, "addr_addressLine1"),
@@ -244,6 +270,10 @@ export function collectedParamsToUpdatePayload(
       return { addresses: [row] };
     }
     case "phones": {
+      const putP = data[ME_PUT_KEY.phones];
+      if (Array.isArray(putP) && putP.length > 0) {
+        return { phones: putP as UpdateCarrierPayload["phones"] };
+      }
       const row = pickDefined({
         phoneType: str(data, "phone_phoneType"),
         countryCode: str(data, "phone_countryCode"),
@@ -257,6 +287,10 @@ export function collectedParamsToUpdatePayload(
       return { phones: [row] };
     }
     case "emails": {
+      const putE = data[ME_PUT_KEY.emails];
+      if (Array.isArray(putE) && putE.length > 0) {
+        return { emails: putE as UpdateCarrierPayload["emails"] };
+      }
       const row = pickDefined({
         emailType: str(data, "em_emailType"),
         emailAddress: str(data, "em_emailAddress"),
@@ -300,6 +334,28 @@ export function updateCarrierHasCategoryChanges(
   return false;
 }
 
+function multiEntryPutToConfirmationRows(
+  categoryId: MultiEntryCategoryId,
+  arr: Record<string, unknown>[],
+): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const keys = UPDATE_CATEGORY_FIELD_KEYS[categoryId];
+  const section = UPDATE_CATEGORY_LABELS[categoryId];
+  arr.forEach((obj, i) => {
+    const flat = snapshotRowToFlatStrings(categoryId, obj);
+    for (const key of keys) {
+      const v = flat[key];
+      if (!v?.trim()) continue;
+      const lab = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
+      rows.push({
+        label: `${section} (${i + 1}) — ${lab}`,
+        value: v,
+      });
+    }
+  });
+  return rows;
+}
+
 export function buildUpdateConfirmationRowsFromData(
   data: Record<string, unknown>,
 ): { label: string; value: string }[] {
@@ -314,6 +370,25 @@ export function buildUpdateConfirmationRowsFromData(
       label: "Section",
       value: UPDATE_CATEGORY_LABELS[cat as UpdateCategoryId],
     });
+  }
+
+  if (
+    typeof cat === "string" &&
+    isMultiEntryCategory(cat as UpdateCategoryId)
+  ) {
+    const put = data[ME_PUT_KEY[cat as MultiEntryCategoryId]];
+    if (Array.isArray(put) && put.length > 0) {
+      rows.push(
+        ...multiEntryPutToConfirmationRows(
+          cat as MultiEntryCategoryId,
+          put.filter(
+            (x): x is Record<string, unknown> =>
+              typeof x === "object" && x !== null && !Array.isArray(x),
+          ),
+        ),
+      );
+      return rows;
+    }
   }
 
   const keys =
@@ -359,6 +434,25 @@ export function buildUpdateSuccessSummaryCardFields(
       label: "Section updated",
       value: UPDATE_CATEGORY_LABELS[cat as UpdateCategoryId],
     });
+  }
+
+  if (
+    typeof cat === "string" &&
+    isMultiEntryCategory(cat as UpdateCategoryId)
+  ) {
+    const put = submittedData[ME_PUT_KEY[cat as MultiEntryCategoryId]];
+    if (Array.isArray(put) && put.length > 0) {
+      rows.push(
+        ...multiEntryPutToConfirmationRows(
+          cat as MultiEntryCategoryId,
+          put.filter(
+            (x): x is Record<string, unknown> =>
+              typeof x === "object" && x !== null && !Array.isArray(x),
+          ),
+        ),
+      );
+      return rows;
+    }
   }
 
   const keys =

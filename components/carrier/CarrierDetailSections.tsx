@@ -89,14 +89,18 @@ function ObjectEntryCards({
   if (items.length === 0) {
     return (
       <div className="mt-3">
-        <p className="text-xs font-semibold text-foreground/80">{title}</p>
+        {title.trim() ? (
+          <p className="text-xs font-semibold text-foreground/80">{title}</p>
+        ) : null}
         <p className="mt-1 text-sm text-accent-muted">N/A</p>
       </div>
     );
   }
   return (
     <div className="mt-3 space-y-2">
-      <p className="text-xs font-semibold text-foreground/80">{title}</p>
+      {title.trim() ? (
+        <p className="text-xs font-semibold text-foreground/80">{title}</p>
+      ) : null}
       <div className="space-y-2">
         {items.map((obj, i) => (
           <div
@@ -213,12 +217,7 @@ export function CarrierDetailSections({
   const phones = objectArray(root.phones);
   const emails = objectArray(root.emails);
 
-  const connectors = isPlainObject(root.connectors) ? root.connectors : {};
-  const dtcc = objectArray(connectors.dtccIds);
-  const c2c = objectArray(connectors.c2cConnectedCarriers);
-
   const urlRows = normalizeUrlRows(base);
-  const identifiers = objectArray(base.identifiers);
   const regulatory = objectArray(base.regulatory);
   const holidays = objectArray(base.businessHolidays);
   const hours = objectArray(base.hoursOfOperation);
@@ -277,14 +276,19 @@ export function CarrierDetailSections({
         )}
       </SectionCard>
 
-      <SectionCard title="Contact details">
-        {phones.length === 0 && emails.length === 0 ? (
+      <SectionCard title="Phone numbers">
+        {phones.length === 0 ? (
           <p className="text-sm text-accent-muted">N/A</p>
         ) : (
-          <>
-            <ObjectEntryCards title="Phone numbers" items={phones} />
-            <ObjectEntryCards title="Email addresses" items={emails} />
-          </>
+          <ObjectEntryCards title="" items={phones} />
+        )}
+      </SectionCard>
+
+      <SectionCard title="Email addresses">
+        {emails.length === 0 ? (
+          <p className="text-sm text-accent-muted">N/A</p>
+        ) : (
+          <ObjectEntryCards title="" items={emails} />
         )}
       </SectionCard>
 
@@ -329,12 +333,6 @@ export function CarrierDetailSections({
             ))}
           </div>
         )}
-        <ObjectEntryCards title="DTCC connectors" items={dtcc} />
-        <ObjectEntryCards
-          title="C2C connected carriers"
-          items={c2c}
-        />
-        <ObjectEntryCards title="Identifiers" items={identifiers} />
         <ObjectEntryCards title="Regulatory" items={regulatory} />
         <ObjectEntryCards title="Business holidays" items={holidays} />
         <ObjectEntryCards title="Hours of operation" items={hours} />

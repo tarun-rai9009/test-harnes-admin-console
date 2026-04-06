@@ -24,15 +24,30 @@ const YN_ENUM_FORM_KEYS = new Set([
   "reg_use1035YP",
 ]);
 
+/** Hidden from admin update UI only; payloads and API mapping still support these ids. */
+const UPDATE_CATEGORY_HIDDEN_FROM_ADMIN_UI = new Set<UpdateCategoryId>([
+  "identifiers",
+  "connectors",
+]);
+
 export function isUpdateCategoryId(s: string): s is UpdateCategoryId {
   return (UPDATE_CATEGORY_ORDER as readonly string[]).includes(s);
 }
 
 export function listUpdateCarrierCategories(): { id: UpdateCategoryId; label: string }[] {
-  return UPDATE_CATEGORY_ORDER.map((id) => ({
+  return UPDATE_CATEGORY_ORDER.filter(
+    (id) => !UPDATE_CATEGORY_HIDDEN_FROM_ADMIN_UI.has(id),
+  ).map((id) => ({
     id,
     label: UPDATE_CATEGORY_LABELS[id],
   }));
+}
+
+/** False for categories hidden from the admin update UI (identifiers, connectors). */
+export function isUpdateCategoryVisibleInAdminUi(
+  categoryId: UpdateCategoryId,
+): boolean {
+  return !UPDATE_CATEGORY_HIDDEN_FROM_ADMIN_UI.has(categoryId);
 }
 
 export function getFieldDefsForUpdateCategory(

@@ -8,6 +8,7 @@ import type {
   UpdateCarrierBaseRegulatory,
   UpdateCarrierBaseUrls,
 } from "@/types/zinnia/carriers";
+import { ME_SNAPSHOT_KEY } from "@/lib/workflows/update-multi-entry-keys";
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -19,6 +20,13 @@ function firstRow<T extends Record<string, unknown>>(
   if (v === undefined || v === null) return undefined;
   if (Array.isArray(v)) return v[0] as T | undefined;
   return v as T;
+}
+
+function cloneObjectArray(v: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(v) || v.length === 0) return [];
+  return v
+    .filter((x) => isPlainObject(x))
+    .map((x) => ({ ...(x as Record<string, unknown>) }));
 }
 
 function ynToForm(v: unknown): string {
@@ -66,7 +74,6 @@ export function carrierGetResponseToCollectedParams(
 
   const base = carrier.base;
   const urlRow = urlsFirst(base?.urls);
-  const idRow = firstRow(base?.identifiers);
   const regRow = firstRow(base?.regulatory) as UpdateCarrierBaseRegulatory | undefined;
   const holRow = firstRow(base?.businessHolidays);
   const hrsRow = firstRow(base?.hoursOfOperation);
@@ -121,14 +128,6 @@ export function carrierGetResponseToCollectedParams(
       const s = str(u[src]);
       if (s) out[flat] = s;
     }
-  }
-
-  if (idRow && isPlainObject(idRow)) {
-    const i = idRow as Record<string, unknown>;
-    const it = str(i.identifierType);
-    const iv = str(i.identifierValue);
-    if (it) out.id_identifierType = it;
-    if (iv) out.id_identifierValue = iv;
   }
 
   if (regRow && isPlainObject(regRow)) {
@@ -192,60 +191,10 @@ export function carrierGetResponseToCollectedParams(
     if (l) out.conn_c2c_locationId = l;
   }
 
-  const addr = firstRow(carrier.addresses);
-  if (addr && isPlainObject(addr)) {
-    const a = addr as Record<string, unknown>;
-    const keys: [string, string][] = [
-      ["addr_addressType", "addressType"],
-      ["addr_addressLine1", "addressLine1"],
-      ["addr_addressLine2", "addressLine2"],
-      ["addr_addressLine3", "addressLine3"],
-      ["addr_city", "city"],
-      ["addr_state", "state"],
-      ["addr_addressZipCode", "addressZipCode"],
-      ["addr_addressZipCodeExt", "addressZipCodeExt"],
-      ["addr_addressCountry", "addressCountry"],
-      ["addr_addressEffectiveDate", "addressEffectiveDate"],
-      ["addr_addressEndDate", "addressEndDate"],
-    ];
-    for (const [flat, src] of keys) {
-      const s = str(a[src]);
-      if (s) out[flat] = s;
-    }
-  }
-
-  const phone = firstRow(carrier.phones);
-  if (phone && isPlainObject(phone)) {
-    const p = phone as Record<string, unknown>;
-    const keys: [string, string][] = [
-      ["phone_phoneType", "phoneType"],
-      ["phone_countryCode", "countryCode"],
-      ["phone_areaCode", "areaCode"],
-      ["phone_dialNumber", "dialNumber"],
-      ["phone_extension", "extension"],
-      ["phone_phoneEffectiveDate", "phoneEffectiveDate"],
-      ["phone_phoneEndDate", "phoneEndDate"],
-    ];
-    for (const [flat, src] of keys) {
-      const s = str(p[src]);
-      if (s) out[flat] = s;
-    }
-  }
-
-  const em = firstRow(carrier.emails);
-  if (em && isPlainObject(em)) {
-    const e = em as Record<string, unknown>;
-    const keys: [string, string][] = [
-      ["em_emailType", "emailType"],
-      ["em_emailAddress", "emailAddress"],
-      ["em_emailEffectiveDate", "emailEffectiveDate"],
-      ["em_emailEndDate", "emailEndDate"],
-    ];
-    for (const [flat, src] of keys) {
-      const s = str(e[src]);
-      if (s) out[flat] = s;
-    }
-  }
+  out[ME_SNAPSHOT_KEY.addresses] = cloneObjectArray(carrier.addresses);
+  out[ME_SNAPSHOT_KEY.phones] = cloneObjectArray(carrier.phones);
+  out[ME_SNAPSHOT_KEY.emails] = cloneObjectArray(carrier.emails);
+  out[ME_SNAPSHOT_KEY.identifiers] = cloneObjectArray(base?.identifiers);
 
   return out;
 }

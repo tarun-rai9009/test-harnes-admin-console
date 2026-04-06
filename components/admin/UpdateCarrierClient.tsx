@@ -1,6 +1,7 @@
 "use client";
 
 import { CarrierDetailSections } from "@/components/carrier/CarrierDetailSections";
+import { UpdateMultiEntrySectionForm } from "@/components/carrier/UpdateMultiEntrySectionForm";
 import { UpdateCarrierSectionForm } from "@/components/carrier/UpdateCarrierSectionForm";
 import { buildUpdateSectionFormStateAdmin } from "@/lib/admin/update-section-form-state";
 import { buildUpdateConfirmationRowsFromData } from "@/lib/workflows/definitions/update-carrier-payload";
@@ -9,7 +10,16 @@ import {
   type UpdateCategoryId,
 } from "@/lib/workflows/definitions/update-carrier-constants";
 import {
+  isMultiEntryCategory,
+  ME_PENDING_ROWS_KEY,
+} from "@/lib/workflows/update-multi-entry-keys";
+import {
+  getInitialMultiEntryRows,
+  validateAndMergeMultiEntrySection,
+} from "@/lib/workflows/update-multi-entry-section";
+import {
   buildUpdateSectionFormStateFromStrings,
+  isUpdateCategoryVisibleInAdminUi,
   listUpdateCarrierCategories,
   stringValuesForUpdateSection,
   validateAndMergeUpdateCarrierSection,
@@ -29,6 +39,24 @@ type Phase =
       merged: Record<string, unknown>;
     };
 
+function rowFieldErrorsFromApi(
+  raw: unknown,
+): Record<number, Record<string, string>> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<number, Record<string, string>> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const idx = Number(k);
+    if (!Number.isInteger(idx) || idx < 0) continue;
+    if (!v || typeof v !== "object") continue;
+    const row: Record<string, string> = {};
+    for (const [fk, fv] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof fv === "string" && fv.trim()) row[fk] = fv.trim();
+    }
+    if (Object.keys(row).length > 0) out[idx] = row;
+  }
+  return out;
+}
+
 export function UpdateCarrierClient() {
   const searchParams = useSearchParams();
   const [phase, setPhase] = useState<Phase>({ kind: "code" });
@@ -38,6 +66,18 @@ export function UpdateCarrierClient() {
   const [collected, setCollected] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
   const [successBanner, setSuccessBanner] = useState("");
+  const [multiEntryErrors, setMultiEntryErrors] = useState<{
+    rowErrors: Record<number, Record<string, string>>;
+    formLevel?: string;
+  } | null>(null);
+
+  const clearPendingMultiEntryRows = useCallback(() => {
+    setCollected((c) => {
+      const next = { ...c };
+      delete next[ME_PENDING_ROWS_KEY];
+      return next;
+    });
+  }, []);
 
   const activeCode = useMemo(() => {
     const c = carrier?.carrierCode ?? collected.carrierCode;
@@ -118,6 +158,28 @@ export function UpdateCarrierClient() {
         values,
       );
       if (!vr.ok) return;
+      setMultiEntryErrors(null);
+      setPhase({
+        kind: "confirm",
+        categoryId,
+        merged: vr.merged,
+      });
+    },
+    [collected],
+  );
+
+  const onMultiEntrySubmit = useCallback(
+    (categoryId: UpdateCategoryId, rows: Record<string, string>[]) => {
+      const vr = validateAndMergeMultiEntrySection(collected, categoryId, rows);
+      if (!vr.ok) {
+        setCollected((c) => ({ ...c, [ME_PENDING_ROWS_KEY]: rows }));
+        setMultiEntryErrors({
+          rowErrors: vr.rowErrors,
+          formLevel: vr.formLevelError,
+        });
+        return;
+      }
+      setMultiEntryErrors(null);
       setPhase({
         kind: "confirm",
         categoryId,
@@ -162,15 +224,23 @@ export function UpdateCarrierClient() {
         categoryId: phase.categoryId,
       });
       setCollected(phase.merged);
-      // Force form remount with errors via key on parent - store form state in a ref? Simpler: useState for formState
-      setFormOverride(
-        buildUpdateSectionFormStateFromStrings(
-          phase.categoryId,
-          stringValuesForUpdateSection(phase.merged, phase.categoryId),
-          fieldErrors,
-          Object.keys(fieldErrors).length === 0 ? formLevel : undefined,
-        ),
-      );
+      if (isMultiEntryCategory(phase.categoryId)) {
+        setMultiEntryErrors({
+          rowErrors: rowFieldErrorsFromApi(data.rowFieldErrors),
+          formLevel,
+        });
+        setFormOverride(null);
+      } else {
+        setMultiEntryErrors(null);
+        setFormOverride(
+          buildUpdateSectionFormStateFromStrings(
+            phase.categoryId,
+            stringValuesForUpdateSection(phase.merged, phase.categoryId),
+            fieldErrors,
+            Object.keys(fieldErrors).length === 0 ? formLevel : undefined,
+          ),
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -180,6 +250,17 @@ export function UpdateCarrierClient() {
     useState<ReturnType<typeof buildUpdateSectionFormStateFromStrings> | null>(
       null,
     );
+
+  useEffect(() => {
+    if (
+      (phase.kind === "form" || phase.kind === "confirm") &&
+      !isUpdateCategoryVisibleInAdminUi(phase.categoryId)
+    ) {
+      setFormOverride(null);
+      setMultiEntryErrors(null);
+      setPhase({ kind: "categories" });
+    }
+  }, [phase]);
 
   const formState =
     phase.kind === "form"
@@ -247,6 +328,7 @@ export function UpdateCarrierClient() {
                 setCollected({});
                 setCodeInput("");
                 setFormOverride(null);
+                setMultiEntryErrors(null);
                 setSuccessBanner("");
               }}
             >
@@ -283,6 +365,7 @@ export function UpdateCarrierClient() {
                 setCollected({});
                 setCodeInput("");
                 setSuccessBanner("");
+                setMultiEntryErrors(null);
                 setFormOverride(null);
               }}
             >
@@ -304,6 +387,8 @@ export function UpdateCarrierClient() {
                     disabled={loading}
                     onClick={() => {
                       setFormOverride(null);
+                      setMultiEntryErrors(null);
+                      clearPendingMultiEntryRows();
                       setPhase({ kind: "form", categoryId: c.id });
                     }}
                   >
@@ -316,7 +401,8 @@ export function UpdateCarrierClient() {
         </div>
       ) : null}
 
-      {phase.kind === "form" && formState ? (
+      {phase.kind === "form" &&
+      isMultiEntryCategory(phase.categoryId) ? (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <button
@@ -324,6 +410,44 @@ export function UpdateCarrierClient() {
               className="ui-btn-secondary"
               onClick={() => {
                 setFormOverride(null);
+                setMultiEntryErrors(null);
+                clearPendingMultiEntryRows();
+                setPhase({ kind: "categories" });
+              }}
+            >
+              Back to sections
+            </button>
+            <button
+              type="button"
+              className="ui-btn-ghost text-sm"
+              onClick={() => setPhase({ kind: "detail" })}
+            >
+              View carrier details
+            </button>
+          </div>
+          <UpdateMultiEntrySectionForm
+            key={`${phase.categoryId}-me-${multiEntryErrors ? "err" : "ok"}`}
+            categoryId={phase.categoryId}
+            collected={collected}
+            disabled={loading}
+            initialRows={getInitialMultiEntryRows(collected, phase.categoryId)}
+            rowErrors={multiEntryErrors?.rowErrors}
+            formLevelError={multiEntryErrors?.formLevel ?? ""}
+            onSubmit={(rows) => onMultiEntrySubmit(phase.categoryId, rows)}
+          />
+        </div>
+      ) : null}
+
+      {phase.kind === "form" && !isMultiEntryCategory(phase.categoryId) && formState ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="ui-btn-secondary"
+              onClick={() => {
+                setFormOverride(null);
+                setMultiEntryErrors(null);
+                clearPendingMultiEntryRows();
                 setPhase({ kind: "categories" });
               }}
             >

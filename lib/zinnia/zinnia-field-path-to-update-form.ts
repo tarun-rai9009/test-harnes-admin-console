@@ -179,3 +179,30 @@ export function zinniaFieldPathToUpdateFormKey(fieldPath: string): string | unde
 
   return undefined;
 }
+
+/**
+ * Parse indexed multi-entry API paths (before bracket stripping) into a row index
+ * and the same flat form keys as single-entry mapping (e.g. id_identifierValue).
+ */
+export function zinniaMultiEntryPathToRowAndFormKey(
+  fieldPath: string,
+): { rowIndex: number; formKey: string } | undefined {
+  const p = fieldPath.replace(/^\$\.?/, "").trim();
+  const patterns: { re: RegExp; leaf: Record<string, string> }[] = [
+    { re: /^base\.identifiers\[(\d+)\]\.([a-zA-Z]+)$/, leaf: ID_LEAF },
+    { re: /^addresses\[(\d+)\]\.([a-zA-Z]+)$/, leaf: ADDR_LEAF },
+    { re: /^phones\[(\d+)\]\.([a-zA-Z]+)$/, leaf: PHONE_LEAF },
+    { re: /^emails\[(\d+)\]\.([a-zA-Z]+)$/, leaf: EMAIL_LEAF },
+  ];
+  for (const { re, leaf } of patterns) {
+    const m = p.match(re);
+    if (!m) continue;
+    const rowIndex = Number(m[1]);
+    if (!Number.isInteger(rowIndex) || rowIndex < 0) continue;
+    const prop = m[2];
+    const formKey = leaf[prop];
+    if (formKey === undefined) continue;
+    return { rowIndex, formKey };
+  }
+  return undefined;
+}
