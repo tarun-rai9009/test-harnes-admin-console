@@ -2,6 +2,7 @@ import "server-only";
 
 import { CHAT_AGENT_TITLE } from "@/lib/branding";
 import { analyzeUserUtterance } from "@/lib/ai/analyze";
+import { textSuggestsCreateCarrierDraft } from "@/lib/ai/heuristics";
 import { mapAiIntentToWorkflowId } from "@/lib/ai/intent-map";
 import type { ExtractedFields, IntentAnalysisResult } from "@/lib/ai/types";
 import {

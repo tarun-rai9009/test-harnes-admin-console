@@ -13,6 +13,11 @@ const LIST_RE =
 const DATA_RE =
   /\b(datapoint|data\s*points|reference\s*data)\b/i;
 
+/** Same rules as CREATE_RE — exported for idle-turn workflow fallback when the LLM returns unknown. */
+export function textSuggestsCreateCarrierDraft(text: string): boolean {
+  return CREATE_RE.test(text.trim());
+}
+
 function extractCarrierCode(text: string): string | undefined {
   const patterns = [
     /\bcarrier\s+code\s+([A-Za-z0-9][A-Za-z0-9_-]*)\b/i,
@@ -116,13 +121,10 @@ function scoreIntent(
   const dataHit = DATA_RE.test(t);
 
   const codePresent = !!extractCarrierCode(t);
+  /** When both create and lookup regex match, prefer create if the user clearly asked to add/draft. */
+  const prefersCreateWhenAmbiguous =
+    /\b(create|add|draft|set\s*up|register|new\s+carrier)\b/i.test(t);
 
-  if (createHit && !lookupHit) {
-    return { intent: "create_carrier_draft", confidence: codePresent ? 0.82 : 0.72 };
-  }
-  if (lookupHit || (codePresent && /\bcarrier\b/i.test(t))) {
-    return { intent: "get_carrier_by_code", confidence: codePresent ? 0.8 : 0.55 };
-  }
   if (listHit) {
     return { intent: "get_all_carriers", confidence: 0.78 };
   }
@@ -130,7 +132,22 @@ function scoreIntent(
     return { intent: "get_datapoints", confidence: 0.78 };
   }
   if (createHit && lookupHit) {
-    return { intent: "unknown", confidence: 0.35 };
+    if (prefersCreateWhenAmbiguous) {
+      return {
+        intent: "create_carrier_draft",
+        confidence: codePresent ? 0.78 : 0.62,
+      };
+    }
+    return {
+      intent: "get_carrier_by_code",
+      confidence: codePresent ? 0.72 : 0.5,
+    };
+  }
+  if (createHit && !lookupHit) {
+    return { intent: "create_carrier_draft", confidence: codePresent ? 0.82 : 0.72 };
+  }
+  if (lookupHit || (codePresent && /\bcarrier\b/i.test(t))) {
+    return { intent: "get_carrier_by_code", confidence: codePresent ? 0.8 : 0.55 };
   }
   return { intent: "unknown", confidence: 0.25 };
 }

@@ -36,10 +36,12 @@ export type CreateCarrierDraftFormField = {
   required: boolean;
   /** Use a taller input (free text only; not used when enumOptions is set). */
   multiline?: boolean;
-  /** From OpenAPI enum — render as `<select>`. */
+  /** From OpenAPI enum — render as `<select>` or checkboxes. */
   enumOptions?: FormFieldSelectOption[];
-  /** Multi-value enum (e.g. product types); comma-separated in `values`. */
+  /** Multi-value enum via `<select multiple>`; comma-separated in `values`. */
   selectMultiple?: boolean;
+  /** Multi-value enum via checkbox group; comma-separated in `values`. */
+  enumCheckboxGroup?: boolean;
 };
 
 /** Shown when create-draft validation fails or user is correcting fields before save. */
