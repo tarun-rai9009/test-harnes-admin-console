@@ -75,7 +75,6 @@ export function carrierGetResponseToCollectedParams(
   const base = carrier.base;
   const urlRow = urlsFirst(base?.urls);
   const regRow = firstRow(base?.regulatory) as UpdateCarrierBaseRegulatory | undefined;
-  const holRow = firstRow(base?.businessHolidays);
   const hrsRow = firstRow(base?.hoursOfOperation);
 
   const carrierId = str(carrier.id ?? base?.carrierId);
@@ -149,16 +148,6 @@ export function carrierGetResponseToCollectedParams(
     if (y2) out.reg_use1035YP = y2;
   }
 
-  if (holRow && isPlainObject(holRow)) {
-    const h = holRow as Record<string, unknown>;
-    const hn = str(h.holidayName);
-    if (hn) out.hol_holidayName = hn;
-    const ht = str(h.holidayType);
-    if (ht) out.hol_holidayType = ht;
-    const doc = str(h.dateOrOccurrence);
-    if (doc) out.hol_dateOrOccurrence = doc;
-  }
-
   if (hrsRow && isPlainObject(hrsRow)) {
     const h = hrsRow as Record<string, unknown>;
     const pairs: [string, string][] = [
@@ -195,6 +184,9 @@ export function carrierGetResponseToCollectedParams(
   out[ME_SNAPSHOT_KEY.phones] = cloneObjectArray(carrier.phones);
   out[ME_SNAPSHOT_KEY.emails] = cloneObjectArray(carrier.emails);
   out[ME_SNAPSHOT_KEY.identifiers] = cloneObjectArray(base?.identifiers);
+  out[ME_SNAPSHOT_KEY.business_holidays] = cloneObjectArray(
+    base?.businessHolidays,
+  );
 
   return out;
 }

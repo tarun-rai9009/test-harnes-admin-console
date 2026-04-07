@@ -3,7 +3,10 @@ import { CarrierListClient } from "@/components/admin/CarrierListClient";
 
 export default function CarriersListPage() {
   return (
-    <AdminChrome title="List All Carriers">
+    <AdminChrome
+      activeService="carrier-master"
+      title="List All Carriers"
+    >
       <CarrierListClient />
     </AdminChrome>
   );

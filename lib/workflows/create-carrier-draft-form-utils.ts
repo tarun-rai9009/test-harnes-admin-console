@@ -5,6 +5,7 @@
 import type {
   CreateCarrierDraftFormState,
 } from "@/types/carrier-forms";
+import type { EnumSelectOption } from "@/lib/workflows/carrier-form-enum-ui";
 import { enumFieldMetaForKey } from "@/lib/workflows/carrier-form-enum-ui";
 import type { CreateCarrierDraftPayload } from "@/types/zinnia/carriers";
 import { trimString } from "@/lib/workflows/validators";
@@ -89,15 +90,28 @@ export function buildCreateCarrierDraftFormState(
   merged: Record<string, unknown>,
   errors: Record<string, string>,
   formLevelError?: string,
+  /** Prefer datapoint-derived options when provided (entityType, lineOfBusiness, productTypes). */
+  enumOptionsOverride?: Partial<
+    Record<(typeof FIELD_ORDER)[number], EnumSelectOption[]>
+  >,
 ): CreateCarrierDraftFormState {
   const fields = FIELD_ORDER.map((key) => {
     const meta = enumFieldMetaForKey(key);
+    const over = enumOptionsOverride?.[key];
+    const useOver = over && over.length > 0;
     return {
       key,
       label: SUMMARY_LABELS[key],
       required: REQUIRED_SET.has(key),
       multiline: false,
       ...(meta ?? {}),
+      ...(useOver
+        ? {
+            enumOptions: over,
+            selectMultiple: meta?.selectMultiple,
+            enumCheckboxGroup: meta?.enumCheckboxGroup,
+          }
+        : {}),
     };
   });
   const values: Record<string, string> = {};

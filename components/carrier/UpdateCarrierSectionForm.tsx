@@ -4,28 +4,58 @@ import {
   CarrierFormEnumControl,
   carrierFieldUsesEnumControl,
 } from "@/components/carrier/CarrierFormEnumControl";
+import type { EnumSelectOption } from "@/lib/workflows/carrier-form-enum-ui";
 import type { UpdateCarrierSectionFormState } from "@/types/carrier-forms";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import {
+  type ValidateSectionResult,
   validateAndMergeUpdateCarrierSection,
 } from "@/lib/workflows/update-carrier-section-form";
 import type { UpdateCategoryId } from "@/lib/workflows/definitions/update-carrier-constants";
-import { useCallback, useEffect, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from "react";
+
+export type UpdateCarrierSectionFormHandle = {
+  flushMerge: (baseCollected: Record<string, unknown>) => ValidateSectionResult;
+};
 
 type Props = {
   form: UpdateCarrierSectionFormState;
   carrierCode: string;
   categoryId: UpdateCategoryId;
   disabled?: boolean;
+  /** Merge into enum-backed fields (datapoint-driven options). */
+  enumOptionsByFieldKey?: Record<string, EnumSelectOption[]>;
+  referenceByKey?: DatapointReferenceMap;
+  /** When false, hide the submit button (parent uses ref.flushMerge, e.g. accordion update). */
+  showPrimarySubmit?: boolean;
+  /** Full collected state for submit validation / change detection (defaults to carrier + category only). */
+  mergeContextCollected?: Record<string, unknown>;
   onSubmit: (values: Record<string, string>) => void;
 };
 
-export function UpdateCarrierSectionForm({
-  form,
-  carrierCode,
-  categoryId,
-  disabled,
-  onSubmit,
-}: Props) {
+export const UpdateCarrierSectionForm = forwardRef<
+  UpdateCarrierSectionFormHandle,
+  Props
+>(function UpdateCarrierSectionForm(
+  {
+    form,
+    carrierCode,
+    categoryId,
+    disabled,
+    enumOptionsByFieldKey,
+    referenceByKey,
+    showPrimarySubmit = true,
+    mergeContextCollected,
+    onSubmit,
+  },
+  ref,
+) {
   const [values, setValues] = useState<Record<string, string>>(form.values);
   const [clientFieldErrors, setClientFieldErrors] = useState<
     Record<string, string>
@@ -59,12 +89,36 @@ export function UpdateCarrierSectionForm({
   const hasValidationErrors =
     hasAnyFieldError || Boolean(formLevelError.trim());
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      flushMerge(baseCollected: Record<string, unknown>) {
+        const result = validateAndMergeUpdateCarrierSection(
+          baseCollected,
+          categoryId,
+          values,
+          referenceByKey,
+        );
+        if (!result.ok) {
+          setClientFieldErrors(result.errors);
+          setClientFormLevel(result.formLevelError ?? "");
+        } else {
+          setClientFieldErrors({});
+          setClientFormLevel("");
+        }
+        return result;
+      },
+    }),
+    [categoryId, referenceByKey, values],
+  );
+
   return (
     <form className="ui-panel"
       onSubmit={(e) => {
         e.preventDefault();
         if (disabled) return;
         const base = {
+          ...(mergeContextCollected ?? {}),
           carrierCode,
           updateCategory: categoryId,
         };
@@ -72,6 +126,7 @@ export function UpdateCarrierSectionForm({
           base,
           categoryId,
           values,
+          referenceByKey,
         );
         if (!result.ok) {
           setClientFieldErrors(result.errors);
@@ -96,6 +151,9 @@ export function UpdateCarrierSectionForm({
       ) : null}
       <div className="mt-4 space-y-4">
         {form.fields.map((f) => {
+          const over = enumOptionsByFieldKey?.[f.key];
+          const field =
+            over && over.length > 0 ? { ...f, enumOptions: over } : f;
           const err = fieldError(f.key);
           const invalid = Boolean(err);
           const baseInput = "ui-input";
@@ -115,9 +173,9 @@ export function UpdateCarrierSectionForm({
                   {f.required ? "Required" : "Optional"}
                 </span>
               </div>
-              {carrierFieldUsesEnumControl(f) ? (
+              {carrierFieldUsesEnumControl(field) ? (
                 <CarrierFormEnumControl
-                  field={f}
+                  field={field}
                   idPrefix="upd"
                   value={values[f.key] ?? ""}
                   onChange={(v) => setField(f.key, v)}
@@ -127,7 +185,7 @@ export function UpdateCarrierSectionForm({
                     invalid ? `upd-err-${f.key}` : undefined
                   }
                 />
-              ) : f.multiline ? (
+              ) : field.multiline ? (
                 <textarea
                   id={`upd-${f.key}`}
                   name={f.key}
@@ -165,11 +223,13 @@ export function UpdateCarrierSectionForm({
           );
         })}
       </div>
-      <div className="mt-5">
-        <button type="submit" disabled={disabled} className="ui-btn-primary">
-          {hasValidationErrors ? "Submit corrections" : "Save updates"}
-        </button>
-      </div>
+      {showPrimarySubmit ? (
+        <div className="mt-5">
+          <button type="submit" disabled={disabled} className="ui-btn-primary">
+            {hasValidationErrors ? "Submit corrections" : "Save updates"}
+          </button>
+        </div>
+      ) : null}
     </form>
   );
-}
+});

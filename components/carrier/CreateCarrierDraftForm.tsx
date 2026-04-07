@@ -5,18 +5,22 @@ import {
   carrierFieldUsesEnumControl,
 } from "@/components/carrier/CarrierFormEnumControl";
 import type { CreateCarrierDraftFormState } from "@/types/carrier-forms";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import { validateCreateCarrierDraftFormValues } from "@/lib/workflows/create-carrier-draft-validate";
 import { useCallback, useEffect, useState } from "react";
 
 type Props = {
   form: CreateCarrierDraftFormState;
   disabled?: boolean;
+  /** When set, enum fields validate against datapoint-derived allowed values. */
+  referenceByKey?: DatapointReferenceMap;
   onSubmit: (values: Record<string, string>) => void;
 };
 
 export function CreateCarrierDraftForm({
   form,
   disabled,
+  referenceByKey,
   onSubmit,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>(form.values);
@@ -58,7 +62,10 @@ export function CreateCarrierDraftForm({
       onSubmit={(e) => {
         e.preventDefault();
         if (disabled) return;
-        const result = validateCreateCarrierDraftFormValues(values);
+        const result = validateCreateCarrierDraftFormValues(
+          values,
+          referenceByKey,
+        );
         if (!result.ok) {
           setClientFieldErrors(result.errors);
           setClientFormLevel("");

@@ -1,3 +1,6 @@
+import { allowedValuesForSchema } from "@/lib/datapoints/enum-options-from-reference";
+import { getCarrierFormEnumBinding } from "@/lib/workflows/carrier-form-enum-bindings";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import { getOpenApiUpdateSectionRequirementErrors } from "@/lib/workflows/update-carrier-openapi-requirements";
 import {
   type UpdateCategoryId,
@@ -82,6 +85,12 @@ export function flatRowToApiObject(
         identifierType: t("id_identifierType"),
         identifierValue: t("id_identifierValue"),
       });
+    case "business_holidays":
+      return pickDefinedRow({
+        holidayName: t("hol_holidayName"),
+        holidayType: t("hol_holidayType"),
+        dateOrOccurrence: t("hol_dateOrOccurrence"),
+      });
     default:
       return {};
   }
@@ -127,6 +136,11 @@ export function snapshotRowToFlatStrings(
     case "identifiers":
       out.id_identifierType = strVal(r.identifierType);
       out.id_identifierValue = strVal(r.identifierValue);
+      break;
+    case "business_holidays":
+      out.hol_holidayName = strVal(r.holidayName);
+      out.hol_holidayType = strVal(r.holidayType);
+      out.hol_dateOrOccurrence = strVal(r.dateOrOccurrence);
       break;
     default:
       break;
@@ -222,15 +236,17 @@ export function duplicateMultiEntryTypeRowErrors(
   return out;
 }
 
-/** New rows (index >= snapshotLength) with data but no type — block adding another entry until fixed. */
+/**
+ * Rows with any field filled but no type — block "Add entry" until fixed.
+ * (Same rule as validateAndMergeMultiEntrySection; index-agnostic so deletes/reorders stay valid.)
+ */
 export function incompleteNewMultiEntryTypeErrors(
   rows: Record<string, string>[],
   categoryId: MultiEntryCategoryId,
-  snapshotLength: number,
 ): Record<number, Record<string, string>> {
   const mk = ME_MATCH_FLAT_KEY[categoryId];
   const out: Record<number, Record<string, string>> = {};
-  for (let i = snapshotLength; i < rows.length; i++) {
+  for (let i = 0; i < rows.length; i++) {
     const flat = rows[i]!;
     if (!rowHasAnyValue(categoryId, flat)) continue;
     if ((flat[mk] ?? "").trim()) continue;
@@ -251,14 +267,11 @@ function mergeIntoRowErrors(
   }
 }
 
-function cloneSnapshotForMerge(
-  arr: Record<string, unknown>[],
-): Record<string, unknown>[] {
-  return arr.map((o) => ({ ...o }));
-}
-
 /**
- * Merge UI rows into snapshot: match on type field; shallow-merge or append.
+ * Build PUT array from current UI rows (authoritative list). Each non-empty row
+ * becomes one API object; snapshot rows whose type is not in the UI are omitted (deletes).
+ * Order follows UI row order. Existing row data is merged: `{ ...snapRow, ...obj }` when
+ * the match key (e.g. addressType) exists in the snapshot.
  */
 export function mergeMultiEntryArrays(
   snapshot: Record<string, unknown>[],
@@ -266,24 +279,33 @@ export function mergeMultiEntryArrays(
   categoryId: MultiEntryCategoryId,
 ): Record<string, unknown>[] {
   const matchKey = ME_MATCH_API_KEY[categoryId];
-  const out = cloneSnapshotForMerge(snapshot);
+  const out: Record<string, unknown>[] = [];
   for (const flat of rows) {
     if (!rowHasAnyValue(categoryId, flat)) continue;
     const obj = flatRowToApiObject(categoryId, flat);
     if (Object.keys(obj).length === 0) continue;
     const keyVal = strVal(obj[matchKey]);
-    if (keyVal) {
-      const idx = out.findIndex(
-        (ex) => strVal(ex[matchKey]) === keyVal,
-      );
-      if (idx >= 0) {
-        out[idx] = { ...out[idx], ...obj };
-        continue;
-      }
-    }
-    out.push(obj);
+    if (!keyVal) continue;
+    const snapRow = snapshot.find(
+      (ex) => strVal(ex[matchKey]) === keyVal,
+    );
+    out.push(
+      snapRow ? { ...snapRow, ...obj } : { ...obj },
+    );
   }
   return out;
+}
+
+/** Per-category override: when true, validateAndMerge rejects mergedArray.length === 0. */
+const MULTI_ENTRY_REQUIRES_AT_LEAST_ONE_ROW: Partial<
+  Record<MultiEntryCategoryId, boolean>
+> = {};
+
+/** Extend MULTI_ENTRY_REQUIRES_AT_LEAST_ONE_ROW when a section must keep ≥1 entry. */
+export function multiEntryRequiresAtLeastOneRow(
+  categoryId: MultiEntryCategoryId,
+): boolean {
+  return MULTI_ENTRY_REQUIRES_AT_LEAST_ONE_ROW[categoryId] === true;
 }
 
 function stableSerializeArray(arr: Record<string, unknown>[]): string {
@@ -318,6 +340,7 @@ export function validateAndMergeMultiEntrySection(
   baseCollected: Record<string, unknown>,
   categoryId: UpdateCategoryId,
   rows: Record<string, string>[],
+  referenceByKey?: DatapointReferenceMap,
 ): MultiEntryValidateResult {
   if (!isMultiEntryCategory(categoryId)) {
     return {
@@ -330,6 +353,7 @@ export function validateAndMergeMultiEntrySection(
   const snapshot = getMultiEntrySnapshot(baseCollected, categoryId);
   const defs = getFieldDefsForUpdateCategory(categoryId);
   const rowErrors: Record<number, Record<string, string>> = {};
+  const hasRef = referenceByKey && Object.keys(referenceByKey).length > 0;
 
   for (let i = 0; i < rows.length; i++) {
     const flat = rows[i]!;
@@ -344,7 +368,34 @@ export function validateAndMergeMultiEntrySection(
     for (const def of defs) {
       const raw = flat[def.key] ?? "";
       const res = def.validate(raw);
-      if (!res.ok) errs[def.key] = res.error;
+      if (!res.ok) {
+        errs[def.key] = res.error;
+        continue;
+      }
+      const n = res.normalized;
+      if (
+        hasRef &&
+        typeof n === "string" &&
+        n.trim()
+      ) {
+        const binding = getCarrierFormEnumBinding(def.key);
+        if (binding) {
+          const allow = allowedValuesForSchema(
+            referenceByKey,
+            binding.schema,
+          );
+          if (!allow.has(n)) {
+            const ci = [...allow].find(
+              (v) => v.toLowerCase() === n.toLowerCase(),
+            );
+            if (!ci) {
+              errs[def.key] = `${def.summaryLabel ?? def.key} must match an allowed value.`;
+            } else {
+              flat[def.key] = ci;
+            }
+          }
+        }
+      }
     }
     const openApi = getOpenApiUpdateSectionRequirementErrors(categoryId, flat);
     Object.assign(errs, openApi);
@@ -362,6 +413,17 @@ export function validateAndMergeMultiEntrySection(
   }
 
   const mergedArray = mergeMultiEntryArrays(snapshot, rows, categoryId);
+
+  if (
+    multiEntryRequiresAtLeastOneRow(categoryId) &&
+    mergedArray.length === 0
+  ) {
+    return {
+      ok: false,
+      rowErrors: {},
+      formLevelError: "At least one entry is required for this section.",
+    };
+  }
 
   if (arraysEqualForMultiEntry(mergedArray, snapshot)) {
     return {

@@ -97,7 +97,7 @@ export function DeleteCarrierClient() {
         </button>
       </form>
       <p className="text-sm text-accent-muted">
-        <Link href="/lookup" className="ui-link-inline">
+        <Link href="/carrier-master/lookup" className="ui-link-inline">
           Look up a carrier first
         </Link>{" "}
         if you want to review details before deleting.

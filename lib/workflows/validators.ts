@@ -319,6 +319,46 @@ export function validateOptionalOpenApiEnum(
   };
 }
 
+/** Required single value — must be in allowed set (e.g. datapoint-derived). */
+export function validateRequiredEnumInSet(
+  fieldLabel: string,
+  allowed: Set<string>,
+) {
+  return (raw: unknown): FieldValidationResult => {
+    const s = trimString(raw);
+    if (!s) {
+      return { ok: false, error: `Please choose ${fieldLabel}.` };
+    }
+    if (allowed.has(s)) return { ok: true, normalized: s };
+    const ci = [...allowed].find((v) => v.toLowerCase() === s.toLowerCase());
+    if (ci) return { ok: true, normalized: ci };
+    return {
+      ok: false,
+      error: `${fieldLabel} must match an allowed value.`,
+    };
+  };
+}
+
+/** Optional — empty or skip tokens ok; else must be in allowed set. */
+export function validateOptionalEnumInSet(
+  fieldLabel: string,
+  allowed: Set<string>,
+) {
+  return (raw: unknown): FieldValidationResult => {
+    const s = trimString(raw);
+    if (!s || SKIP_TOKENS.has(s.toLowerCase())) {
+      return { ok: true, normalized: "" };
+    }
+    if (allowed.has(s)) return { ok: true, normalized: s };
+    const ci = [...allowed].find((v) => v.toLowerCase() === s.toLowerCase());
+    if (ci) return { ok: true, normalized: ci };
+    return {
+      ok: false,
+      error: `${fieldLabel} must match an allowed value or **skip**.`,
+    };
+  };
+}
+
 /** Optional year-like value; skip → "". */
 export function validateOptionalYear(fieldLabel: string) {
   return (raw: unknown): FieldValidationResult => {

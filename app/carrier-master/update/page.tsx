@@ -4,7 +4,10 @@ import { Suspense } from "react";
 
 export default function UpdateCarrierPage() {
   return (
-    <AdminChrome title="Update Carrier">
+    <AdminChrome
+      activeService="carrier-master"
+      title="Update Carrier"
+    >
       <Suspense fallback={<p className="text-sm text-accent-muted">Loading…</p>}>
         <UpdateCarrierClient />
       </Suspense>

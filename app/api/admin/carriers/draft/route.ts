@@ -3,9 +3,10 @@ import {
   mergeCreateCarrierDraftFormIntoCollected,
 } from "@/lib/workflows/create-carrier-draft-form-utils";
 import { validateCreateCarrierDraftMerged } from "@/lib/workflows/create-carrier-draft-validate";
-import { createCarrierDraft } from "@/lib/zinnia/carriers";
+import { createCarrierDraft, getDatapoints } from "@/lib/zinnia/carriers";
 import { parseZinniaCreateDraftErrorBody } from "@/lib/zinnia/parse-create-draft-errors";
 import { ZinniaApiError } from "@/lib/zinnia/types";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -38,7 +39,14 @@ export async function POST(request: Request) {
   }
 
   const merged = mergeCreateCarrierDraftFormIntoCollected({}, values);
-  const vr = validateCreateCarrierDraftMerged(merged);
+  let referenceByKey: DatapointReferenceMap = {};
+  try {
+    const dp = await getDatapoints();
+    referenceByKey = dp.referenceByKey ?? {};
+  } catch {
+    /* validate without datapoint tightening */
+  }
+  const vr = validateCreateCarrierDraftMerged(merged, referenceByKey);
   if (!vr.ok) {
     return NextResponse.json(
       {

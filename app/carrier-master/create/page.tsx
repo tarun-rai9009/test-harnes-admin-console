@@ -3,7 +3,10 @@ import { CreateCarrierPageClient } from "@/components/admin/CreateCarrierPageCli
 
 export default function CreateCarrierPage() {
   return (
-    <AdminChrome title="Create New Carrier">
+    <AdminChrome
+      activeService="carrier-master"
+      title="Create New Carrier"
+    >
       <CreateCarrierPageClient />
     </AdminChrome>
   );

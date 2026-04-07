@@ -15,6 +15,8 @@ export const runtime = "nodejs";
 
 type PutBody = {
   updateCategory?: string;
+  /** When set (non-empty, all valid ids), builds one merged PUT body for all listed sections. */
+  updateCategories?: string[];
   collectedParams?: Record<string, unknown>;
 };
 
@@ -99,13 +101,8 @@ export async function PUT(
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const { updateCategory, collectedParams } = (body ?? {}) as PutBody;
-  if (typeof updateCategory !== "string" || !isUpdateCategoryId(updateCategory)) {
-    return NextResponse.json(
-      { error: "Invalid or missing updateCategory" },
-      { status: 400 },
-    );
-  }
+  const { updateCategory, updateCategories, collectedParams } =
+    (body ?? {}) as PutBody;
   if (
     !collectedParams ||
     typeof collectedParams !== "object" ||
@@ -117,11 +114,38 @@ export async function PUT(
     );
   }
 
-  const data: Record<string, unknown> = {
-    ...collectedParams,
-    carrierCode: urlCode,
-    updateCategory,
-  };
+  const multiOk =
+    Array.isArray(updateCategories) &&
+    updateCategories.length > 0 &&
+    updateCategories.every(
+      (x) => typeof x === "string" && isUpdateCategoryId(x),
+    );
+
+  let data: Record<string, unknown>;
+  if (multiOk) {
+    data = {
+      ...collectedParams,
+      carrierCode: urlCode,
+      updateCategories,
+    };
+  } else if (
+    typeof updateCategory === "string" &&
+    isUpdateCategoryId(updateCategory)
+  ) {
+    data = {
+      ...collectedParams,
+      carrierCode: urlCode,
+      updateCategory,
+    };
+  } else {
+    return NextResponse.json(
+      {
+        error:
+          "Invalid or missing update payload: send updateCategory (one section) or updateCategories (non-empty array of section ids).",
+      },
+      { status: 400 },
+    );
+  }
 
   const def = getWorkflowDefinition("update_carrier");
   if (!def) {
@@ -143,7 +167,7 @@ export async function PUT(
   }
   if (!updatePayloadHasBody(built.putPayload as never)) {
     return NextResponse.json(
-      { error: "No update fields were provided for this section." },
+      { error: "No update fields were provided." },
       { status: 400 },
     );
   }

@@ -15,7 +15,19 @@ export const showDatapointsWorkflow: WorkflowDefinition = {
   formatSuccess: (result) => {
     const r = result as DatapointResponse;
     const items = r.items ?? [];
+    const refKeys = Object.keys(r.referenceByKey ?? {});
     const n = items.length;
+    if (n === 0 && refKeys.length > 0) {
+      const totalEntries = refKeys.reduce(
+        (acc, k) =>
+          acc + Object.keys(r.referenceByKey![k] ?? {}).length,
+        0,
+      );
+      return {
+        message: `${refKeys.length} datapoint groups (${totalEntries} values).`,
+        summaryLines: refKeys.slice(0, 20).map((k) => `• ${k}`),
+      };
+    }
     if (n === 0) {
       return {
         message: "Reference list is empty.",

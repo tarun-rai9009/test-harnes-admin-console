@@ -5,6 +5,7 @@ export const MULTI_ENTRY_CATEGORIES = [
   "phones",
   "emails",
   "identifiers",
+  "business_holidays",
 ] as const;
 
 export type MultiEntryCategoryId = (typeof MULTI_ENTRY_CATEGORIES)[number];
@@ -21,6 +22,7 @@ export const ME_SNAPSHOT_KEY: Record<MultiEntryCategoryId, string> = {
   phones: "_me_snapshot_phones",
   emails: "_me_snapshot_emails",
   identifiers: "_me_snapshot_identifiers",
+  business_holidays: "_me_snapshot_business_holidays",
 };
 
 /** Collected keys: full merged arrays sent in PUT (built on submit). */
@@ -29,6 +31,7 @@ export const ME_PUT_KEY: Record<MultiEntryCategoryId, string> = {
   phones: "_me_put_phones",
   emails: "_me_put_emails",
   identifiers: "_me_put_identifiers",
+  business_holidays: "_me_put_business_holidays",
 };
 
 /** API field used to match existing row for upsert (first match wins). */
@@ -37,6 +40,7 @@ export const ME_MATCH_API_KEY: Record<MultiEntryCategoryId, string> = {
   phones: "phoneType",
   emails: "emailType",
   identifiers: "identifierType",
+  business_holidays: "holidayType",
 };
 
 /** Collected flat key for the match field (required when row has any other value). */
@@ -45,6 +49,7 @@ export const ME_MATCH_FLAT_KEY: Record<MultiEntryCategoryId, string> = {
   phones: "phone_phoneType",
   emails: "em_emailType",
   identifiers: "id_identifierType",
+  business_holidays: "hol_holidayType",
 };
 
 /** Stash edited flat rows for re-showing the form after a failed PUT. */

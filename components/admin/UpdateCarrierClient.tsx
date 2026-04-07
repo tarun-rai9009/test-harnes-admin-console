@@ -1,43 +1,68 @@
 "use client";
 
-import { CarrierDetailSections } from "@/components/carrier/CarrierDetailSections";
-import { UpdateMultiEntrySectionForm } from "@/components/carrier/UpdateMultiEntrySectionForm";
-import { UpdateCarrierSectionForm } from "@/components/carrier/UpdateCarrierSectionForm";
+import {
+  distributeFieldErrorsByUpdateCategory,
+  primaryMultiEntryCategoryForRowErrors,
+} from "@/lib/admin/update-carrier-flat-field-to-category";
 import { buildUpdateSectionFormStateAdmin } from "@/lib/admin/update-section-form-state";
-import { buildUpdateConfirmationRowsFromData } from "@/lib/workflows/definitions/update-carrier-payload";
+import { CarrierDetailSections } from "@/components/carrier/CarrierDetailSections";
+import {
+  type UpdateMultiEntrySectionFormHandle,
+  UpdateMultiEntrySectionForm,
+} from "@/components/carrier/UpdateMultiEntrySectionForm";
+import {
+  type UpdateCarrierSectionFormHandle,
+  UpdateCarrierSectionForm,
+} from "@/components/carrier/UpdateCarrierSectionForm";
+import { buildEnumOptionsByFieldKey } from "@/lib/datapoints/enum-options-from-reference";
 import {
   UPDATE_CATEGORY_LABELS,
+  UPDATE_CATEGORY_ORDER,
   type UpdateCategoryId,
 } from "@/lib/workflows/definitions/update-carrier-constants";
+import { getUpdateCarrierNoChangesMessage } from "@/lib/workflows/definitions/update-carrier-catalog";
+import { buildUpdateConfirmationRowsFromMultiCategoryData } from "@/lib/workflows/definitions/update-carrier-payload";
 import {
   isMultiEntryCategory,
   ME_PENDING_ROWS_KEY,
+  type MultiEntryCategoryId,
 } from "@/lib/workflows/update-multi-entry-keys";
 import {
   getInitialMultiEntryRows,
-  validateAndMergeMultiEntrySection,
+  type MultiEntryValidateResult,
 } from "@/lib/workflows/update-multi-entry-section";
 import {
   buildUpdateSectionFormStateFromStrings,
   isUpdateCategoryVisibleInAdminUi,
   listUpdateCarrierCategories,
   stringValuesForUpdateSection,
-  validateAndMergeUpdateCarrierSection,
+  type ValidateSectionResult,
 } from "@/lib/workflows/update-carrier-section-form";
 import type { CarrierGetResponse } from "@/types/zinnia/carriers";
+import type { UpdateCarrierSectionFormState } from "@/types/carrier-forms";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type Phase =
   | { kind: "code" }
   | { kind: "detail" }
-  | { kind: "categories" }
-  | { kind: "form"; categoryId: UpdateCategoryId }
+  | { kind: "edit" }
   | {
       kind: "confirm";
-      categoryId: UpdateCategoryId;
       merged: Record<string, unknown>;
+      updateCategoriesApplied: UpdateCategoryId[];
     };
+
+type SectionFlushRef =
+  | UpdateCarrierSectionFormHandle
+  | UpdateMultiEntrySectionFormHandle;
 
 function rowFieldErrorsFromApi(
   raw: unknown,
@@ -57,6 +82,23 @@ function rowFieldErrorsFromApi(
   return out;
 }
 
+function isNoChangesFailure(
+  r: ValidateSectionResult | MultiEntryValidateResult,
+  noChangeMsg: string,
+): boolean {
+  if (r.ok) return false;
+  if ("rowErrors" in r) {
+    return (
+      Object.keys(r.rowErrors).length === 0 &&
+      (r.formLevelError ?? "") === noChangeMsg
+    );
+  }
+  return (
+    Object.keys(r.errors).length === 0 &&
+    (r.formLevelError ?? "") === noChangeMsg
+  );
+}
+
 export function UpdateCarrierClient() {
   const searchParams = useSearchParams();
   const [phase, setPhase] = useState<Phase>({ kind: "code" });
@@ -66,10 +108,53 @@ export function UpdateCarrierClient() {
   const [collected, setCollected] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
   const [successBanner, setSuccessBanner] = useState("");
-  const [multiEntryErrors, setMultiEntryErrors] = useState<{
-    rowErrors: Record<number, Record<string, string>>;
-    formLevel?: string;
-  } | null>(null);
+  const [reviewHint, setReviewHint] = useState("");
+  const [editNonce, setEditNonce] = useState(0);
+  const [referenceByKey, setReferenceByKey] = useState<DatapointReferenceMap>(
+    {},
+  );
+  const [editSingleOverrides, setEditSingleOverrides] = useState<
+    Partial<Record<UpdateCategoryId, UpdateCarrierSectionFormState>>
+  >({});
+  const [editMultiErrors, setEditMultiErrors] = useState<
+    Partial<
+      Record<
+        MultiEntryCategoryId,
+        { rowErrors: Record<number, Record<string, string>>; formLevel?: string }
+      >
+    >
+  >({});
+
+  const sectionRefs = useRef<Partial<Record<UpdateCategoryId, SectionFlushRef | null>>>(
+    {},
+  );
+  const noChangesMessage = useMemo(() => getUpdateCarrierNoChangesMessage(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/datapoints");
+        const data = (await res.json()) as {
+          referenceByKey?: DatapointReferenceMap;
+        };
+        if (cancelled || !res.ok) return;
+        if (data.referenceByKey && typeof data.referenceByKey === "object") {
+          setReferenceByKey(data.referenceByKey);
+        }
+      } catch {
+        /* keep empty — forms fall back to OpenAPI enums */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enumOptionsByFieldKey = useMemo(
+    () => buildEnumOptionsByFieldKey(referenceByKey),
+    [referenceByKey],
+  );
 
   const clearPendingMultiEntryRows = useCallback(() => {
     setCollected((c) => {
@@ -77,6 +162,14 @@ export function UpdateCarrierClient() {
       delete next[ME_PENDING_ROWS_KEY];
       return next;
     });
+  }, []);
+
+  const resetEditSurface = useCallback(() => {
+    setEditSingleOverrides({});
+    setEditMultiErrors({});
+    setReviewHint("");
+    sectionRefs.current = {};
+    setEditNonce((n) => n + 1);
   }, []);
 
   const activeCode = useMemo(() => {
@@ -150,44 +243,40 @@ export function UpdateCarrierClient() {
     }
   }, [activeCode]);
 
-  const onFormSubmit = useCallback(
-    (categoryId: UpdateCategoryId, values: Record<string, string>) => {
-      const vr = validateAndMergeUpdateCarrierSection(
-        collected,
-        categoryId,
-        values,
-      );
-      if (!vr.ok) return;
-      setMultiEntryErrors(null);
-      setPhase({
-        kind: "confirm",
-        categoryId,
-        merged: vr.merged,
-      });
-    },
-    [collected],
-  );
+  const runReviewChanges = useCallback(() => {
+    setReviewHint("");
+    let acc = { ...collected };
+    const applied: UpdateCategoryId[] = [];
+    let hadRealError = false;
 
-  const onMultiEntrySubmit = useCallback(
-    (categoryId: UpdateCategoryId, rows: Record<string, string>[]) => {
-      const vr = validateAndMergeMultiEntrySection(collected, categoryId, rows);
-      if (!vr.ok) {
-        setCollected((c) => ({ ...c, [ME_PENDING_ROWS_KEY]: rows }));
-        setMultiEntryErrors({
-          rowErrors: vr.rowErrors,
-          formLevel: vr.formLevelError,
-        });
-        return;
+    for (const cat of UPDATE_CATEGORY_ORDER) {
+      if (!isUpdateCategoryVisibleInAdminUi(cat)) continue;
+      const ref = sectionRefs.current[cat];
+      if (!ref) continue;
+      const r = ref.flushMerge(acc);
+      if (r.ok) {
+        acc = r.merged;
+        applied.push(cat);
+        continue;
       }
-      setMultiEntryErrors(null);
-      setPhase({
-        kind: "confirm",
-        categoryId,
-        merged: vr.merged,
-      });
-    },
-    [collected],
-  );
+      if (isNoChangesFailure(r, noChangesMessage)) continue;
+      hadRealError = true;
+    }
+
+    if (hadRealError) return;
+    if (applied.length === 0) {
+      setReviewHint(
+        "No changes to apply. Edit at least one section, then try again.",
+      );
+      return;
+    }
+
+    setPhase({
+      kind: "confirm",
+      merged: acc,
+      updateCategoriesApplied: applied,
+    });
+  }, [collected, noChangesMessage]);
 
   const onConfirmPut = useCallback(async () => {
     if (phase.kind !== "confirm") return;
@@ -200,18 +289,24 @@ export function UpdateCarrierClient() {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            updateCategory: phase.categoryId,
+            updateCategories: phase.updateCategoriesApplied,
             collectedParams: phase.merged,
           }),
         },
       );
       const data = await res.json();
       if (res.ok && data.ok) {
+        const labels = phase.updateCategoriesApplied.map(
+          (id) => UPDATE_CATEGORY_LABELS[id],
+        );
         setSuccessBanner(
-          `${UPDATE_CATEGORY_LABELS[phase.categoryId]} updated.`,
+          labels.length === 1
+            ? `${labels[0]} updated.`
+            : `Updated: ${labels.join(", ")}.`,
         );
         await refreshAfterUpdate();
-        setPhase({ kind: "categories" });
+        resetEditSurface();
+        setPhase({ kind: "detail" });
         return;
       }
       const fieldErrors =
@@ -219,56 +314,80 @@ export function UpdateCarrierClient() {
       const formLevel =
         (data.formLevelMessage as string | undefined) ??
         (typeof data.error === "string" ? data.error : "Update failed.");
-      setPhase({
-        kind: "form",
-        categoryId: phase.categoryId,
-      });
-      setCollected(phase.merged);
-      if (isMultiEntryCategory(phase.categoryId)) {
-        setMultiEntryErrors({
-          rowErrors: rowFieldErrorsFromApi(data.rowFieldErrors),
-          formLevel,
-        });
-        setFormOverride(null);
-      } else {
-        setMultiEntryErrors(null);
-        setFormOverride(
-          buildUpdateSectionFormStateFromStrings(
-            phase.categoryId,
-            stringValuesForUpdateSection(phase.merged, phase.categoryId),
-            fieldErrors,
-            Object.keys(fieldErrors).length === 0 ? formLevel : undefined,
-          ),
+      const applied = phase.updateCategoriesApplied;
+      const merged = phase.merged;
+      setPhase({ kind: "edit" });
+      setCollected(merged);
+      setEditNonce((n) => n + 1);
+
+      const byCat = distributeFieldErrorsByUpdateCategory(fieldErrors);
+      const nextSingle: Partial<
+        Record<UpdateCategoryId, UpdateCarrierSectionFormState>
+      > = {};
+      for (const cat of applied) {
+        if (isMultiEntryCategory(cat)) continue;
+        const errs = byCat[cat] ?? {};
+        nextSingle[cat] = buildUpdateSectionFormStateFromStrings(
+          cat,
+          stringValuesForUpdateSection(merged, cat),
+          errs,
+          Object.keys(errs).length === 0 ? formLevel : undefined,
         );
+      }
+
+      const rowApi = rowFieldErrorsFromApi(data.rowFieldErrors);
+      const meCat = primaryMultiEntryCategoryForRowErrors(applied);
+      if (
+        formLevel.trim() &&
+        Object.keys(byCat).length === 0 &&
+        Object.keys(rowApi).length === 0 &&
+        applied.length > 0
+      ) {
+        const first = applied[0]!;
+        if (isMultiEntryCategory(first)) {
+          setEditMultiErrors({
+            [first]: { rowErrors: {}, formLevel },
+          });
+          setEditSingleOverrides(nextSingle);
+        } else {
+          setEditMultiErrors({});
+          setEditSingleOverrides({
+            ...nextSingle,
+            [first]: buildUpdateSectionFormStateFromStrings(
+              first,
+              stringValuesForUpdateSection(merged, first),
+              {},
+              formLevel,
+            ),
+          });
+        }
+      } else {
+        setEditSingleOverrides(nextSingle);
+        if (meCat && (Object.keys(rowApi).length > 0 || formLevel.trim())) {
+          setEditMultiErrors({
+            [meCat]: {
+              rowErrors: rowApi,
+              ...(formLevel.trim() ? { formLevel } : {}),
+            },
+          });
+        } else {
+          setEditMultiErrors({});
+        }
       }
     } finally {
       setLoading(false);
     }
-  }, [phase, activeCode, refreshAfterUpdate]);
-
-  const [formOverride, setFormOverride] =
-    useState<ReturnType<typeof buildUpdateSectionFormStateFromStrings> | null>(
-      null,
-    );
-
-  useEffect(() => {
-    if (
-      (phase.kind === "form" || phase.kind === "confirm") &&
-      !isUpdateCategoryVisibleInAdminUi(phase.categoryId)
-    ) {
-      setFormOverride(null);
-      setMultiEntryErrors(null);
-      setPhase({ kind: "categories" });
-    }
-  }, [phase]);
-
-  const formState =
-    phase.kind === "form"
-      ? formOverride ??
-        buildUpdateSectionFormStateAdmin(collected, phase.categoryId)
-      : null;
+  }, [phase, activeCode, refreshAfterUpdate, resetEditSurface]);
 
   const categories = listUpdateCarrierCategories();
+
+  const bindSectionRef = useCallback(
+    (categoryId: UpdateCategoryId, el: SectionFlushRef | null) => {
+      if (el) sectionRefs.current[categoryId] = el;
+      else delete sectionRefs.current[categoryId];
+    },
+    [],
+  );
 
   return (
     <div className="space-y-8">
@@ -327,8 +446,7 @@ export function UpdateCarrierClient() {
                 setCarrier(null);
                 setCollected({});
                 setCodeInput("");
-                setFormOverride(null);
-                setMultiEntryErrors(null);
+                resetEditSurface();
                 setSuccessBanner("");
               }}
             >
@@ -337,22 +455,29 @@ export function UpdateCarrierClient() {
             <button
               type="button"
               className="ui-btn-primary"
-              onClick={() => setPhase({ kind: "categories" })}
+              onClick={() => {
+                resetEditSurface();
+                clearPendingMultiEntryRows();
+                setPhase({ kind: "edit" });
+              }}
             >
-              Choose section to update
+              Update carrier
             </button>
           </div>
           <CarrierDetailSections data={carrier} />
         </div>
       ) : null}
 
-      {phase.kind === "categories" && carrier ? (
+      {phase.kind === "edit" && carrier ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               className="ui-btn-secondary"
-              onClick={() => setPhase({ kind: "detail" })}
+              onClick={() => {
+                resetEditSurface();
+                setPhase({ kind: "detail" });
+              }}
             >
               Back to details
             </button>
@@ -365,110 +490,91 @@ export function UpdateCarrierClient() {
                 setCollected({});
                 setCodeInput("");
                 setSuccessBanner("");
-                setMultiEntryErrors(null);
-                setFormOverride(null);
+                resetEditSurface();
               }}
             >
               Change carrier code
             </button>
           </div>
+
           <div className="ui-panel">
-            <p className="ui-panel-title">Sections</p>
+            <p className="ui-panel-title">Update sections</p>
             <p className="ui-panel-desc">
               <span className="font-mono font-semibold">{activeCode}</span> —
-              pick one category per update.
+              expand any sections you need. Use <strong>Review changes</strong>{" "}
+              when ready; multiple sections can be updated in one save.
             </p>
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-              {categories.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-left text-sm font-medium shadow-sm transition hover:border-accent/35 hover:bg-surface-muted disabled:opacity-50"
-                    disabled={loading}
-                    onClick={() => {
-                      setFormOverride(null);
-                      setMultiEntryErrors(null);
-                      clearPendingMultiEntryRows();
-                      setPhase({ kind: "form", categoryId: c.id });
-                    }}
-                  >
-                    {c.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {reviewHint ? (
+              <p className="ui-alert-danger mt-3" role="status">
+                {reviewHint}
+              </p>
+            ) : null}
           </div>
-        </div>
-      ) : null}
 
-      {phase.kind === "form" &&
-      isMultiEntryCategory(phase.categoryId) ? (
-        <div className="space-y-4">
+          <div className="space-y-3">
+            {categories.map((c) => (
+              <details
+                key={`${c.id}-${editNonce}`}
+                className="group rounded-xl border border-border bg-surface shadow-sm open:shadow-md"
+              >
+                <summary className="cursor-pointer list-none px-4 py-3 font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center justify-between gap-2">
+                    <span>{c.label}</span>
+                    <span className="text-xs font-normal text-accent-muted group-open:hidden">
+                      Expand
+                    </span>
+                    <span className="hidden text-xs font-normal text-accent-muted group-open:inline">
+                      Collapse
+                    </span>
+                  </span>
+                </summary>
+                <div className="border-t border-border/60 px-2 pb-4 pt-2">
+                  {isMultiEntryCategory(c.id) ? (
+                    <UpdateMultiEntrySectionForm
+                      ref={(el) => bindSectionRef(c.id, el)}
+                      categoryId={c.id}
+                      collected={collected}
+                      disabled={loading}
+                      initialRows={getInitialMultiEntryRows(collected, c.id)}
+                      rowErrors={editMultiErrors[c.id]?.rowErrors}
+                      formLevelError={editMultiErrors[c.id]?.formLevel ?? ""}
+                      enumOptionsByFieldKey={enumOptionsByFieldKey}
+                      referenceByKey={referenceByKey}
+                      showPrimarySubmit={false}
+                      onSubmit={() => {}}
+                    />
+                  ) : (
+                    <UpdateCarrierSectionForm
+                      ref={(el) => bindSectionRef(c.id, el)}
+                      form={
+                        editSingleOverrides[c.id] ??
+                        buildUpdateSectionFormStateAdmin(collected, c.id)
+                      }
+                      carrierCode={activeCode}
+                      categoryId={c.id}
+                      disabled={loading}
+                      enumOptionsByFieldKey={enumOptionsByFieldKey}
+                      referenceByKey={referenceByKey}
+                      mergeContextCollected={collected}
+                      showPrimarySubmit={false}
+                      onSubmit={() => {}}
+                    />
+                  )}
+                </div>
+              </details>
+            ))}
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="ui-btn-secondary"
-              onClick={() => {
-                setFormOverride(null);
-                setMultiEntryErrors(null);
-                clearPendingMultiEntryRows();
-                setPhase({ kind: "categories" });
-              }}
+              className="ui-btn-primary"
+              disabled={loading}
+              onClick={runReviewChanges}
             >
-              Back to sections
-            </button>
-            <button
-              type="button"
-              className="ui-btn-ghost text-sm"
-              onClick={() => setPhase({ kind: "detail" })}
-            >
-              View carrier details
+              Review changes
             </button>
           </div>
-          <UpdateMultiEntrySectionForm
-            key={`${phase.categoryId}-me-${multiEntryErrors ? "err" : "ok"}`}
-            categoryId={phase.categoryId}
-            collected={collected}
-            disabled={loading}
-            initialRows={getInitialMultiEntryRows(collected, phase.categoryId)}
-            rowErrors={multiEntryErrors?.rowErrors}
-            formLevelError={multiEntryErrors?.formLevel ?? ""}
-            onSubmit={(rows) => onMultiEntrySubmit(phase.categoryId, rows)}
-          />
-        </div>
-      ) : null}
-
-      {phase.kind === "form" && !isMultiEntryCategory(phase.categoryId) && formState ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="ui-btn-secondary"
-              onClick={() => {
-                setFormOverride(null);
-                setMultiEntryErrors(null);
-                clearPendingMultiEntryRows();
-                setPhase({ kind: "categories" });
-              }}
-            >
-              Back to sections
-            </button>
-            <button
-              type="button"
-              className="ui-btn-ghost text-sm"
-              onClick={() => setPhase({ kind: "detail" })}
-            >
-              View carrier details
-            </button>
-          </div>
-          <UpdateCarrierSectionForm
-            key={`${phase.categoryId}-${formOverride ? "e" : "n"}`}
-            form={formState}
-            carrierCode={activeCode}
-            categoryId={phase.categoryId}
-            disabled={loading}
-            onSubmit={(values) => onFormSubmit(phase.categoryId, values)}
-          />
         </div>
       ) : null}
 
@@ -481,11 +587,8 @@ export function UpdateCarrierClient() {
               disabled={loading}
               onClick={() => {
                 setCollected(phase.merged);
-                setFormOverride(null);
-                setPhase({
-                  kind: "form",
-                  categoryId: phase.categoryId,
-                });
+                setPhase({ kind: "edit" });
+                setEditNonce((n) => n + 1);
               }}
             >
               Back to edit
@@ -500,19 +603,20 @@ export function UpdateCarrierClient() {
               <span className="font-mono font-semibold">{activeCode}</span>?
             </p>
             <dl className="space-y-3 border-t border-border/60 pt-4">
-              {buildUpdateConfirmationRowsFromData(phase.merged).map(
-                (row, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,38%)_1fr] sm:gap-3"
-                  >
-                    <dt className="text-sm font-medium text-accent-muted">
-                      {row.label}
-                    </dt>
-                    <dd className="text-sm text-foreground">{row.value}</dd>
-                  </div>
-                ),
-              )}
+              {buildUpdateConfirmationRowsFromMultiCategoryData(
+                phase.merged,
+                phase.updateCategoriesApplied,
+              ).map((row, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,38%)_1fr] sm:gap-3"
+                >
+                  <dt className="text-sm font-medium text-accent-muted">
+                    {row.label}
+                  </dt>
+                  <dd className="text-sm text-foreground">{row.value}</dd>
+                </div>
+              ))}
             </dl>
             <button
               type="button"

@@ -8,7 +8,10 @@ import {
 import {
   updateCarrierHasCategoryChanges,
 } from "@/lib/workflows/definitions/update-carrier-payload";
+import { allowedValuesForSchema } from "@/lib/datapoints/enum-options-from-reference";
 import { mergeEnumFieldMeta } from "@/lib/workflows/carrier-form-enum-ui";
+import { getCarrierFormEnumBinding } from "@/lib/workflows/carrier-form-enum-bindings";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import { getUpdateCarrierNoChangesMessage } from "@/lib/workflows/definitions/update-carrier-catalog";
 import { getOpenApiUpdateSectionRequirementErrors } from "@/lib/workflows/update-carrier-openapi-requirements";
 import type { WorkflowFieldDefinition } from "@/lib/workflows/workflow-types";
@@ -127,6 +130,7 @@ export function validateAndMergeUpdateCarrierSection(
   baseCollected: Record<string, unknown>,
   categoryId: UpdateCategoryId,
   values: Record<string, string>,
+  referenceByKey?: DatapointReferenceMap,
 ): ValidateSectionResult {
   const defs = getFieldDefsForUpdateCategory(categoryId);
   const merged: Record<string, unknown> = { ...baseCollected };
@@ -138,6 +142,7 @@ export function validateAndMergeUpdateCarrierSection(
   }
 
   const errors: Record<string, string> = {};
+  const hasRef = referenceByKey && Object.keys(referenceByKey).length > 0;
 
   for (const def of defs) {
     const raw = values[def.key] ?? "";
@@ -147,13 +152,42 @@ export function validateAndMergeUpdateCarrierSection(
       continue;
     }
     const n = res.normalized;
+    if (def.key === "basic_productTypes") {
+      const arr =
+        n === "" || n === undefined || n === null
+          ? []
+          : Array.isArray(n)
+            ? (n as unknown[])
+                .map((x) => String(x).trim())
+                .filter(Boolean)
+            : [];
+      merged[def.key] = arr;
+      continue;
+    }
     if (n === "" || n === undefined || n === null) {
       continue;
     }
     if (Array.isArray(n) && n.length === 0) {
       continue;
     }
-    merged[def.key] = n;
+    let toAssign: unknown = n;
+    if (hasRef && typeof n === "string" && n.trim()) {
+      const binding = getCarrierFormEnumBinding(def.key);
+      if (binding) {
+        const allow = allowedValuesForSchema(referenceByKey, binding.schema);
+        if (!allow.has(n)) {
+          const ci = [...allow].find(
+            (v) => v.toLowerCase() === n.toLowerCase(),
+          );
+          if (!ci) {
+            errors[def.key] = `${def.summaryLabel ?? def.key} must match an allowed value or **skip**.`;
+            continue;
+          }
+          toAssign = ci;
+        }
+      }
+    }
+    merged[def.key] = toAssign;
   }
 
   if (Object.keys(errors).length > 0) {
@@ -168,7 +202,7 @@ export function validateAndMergeUpdateCarrierSection(
     return { ok: false, errors: openapiReqErrors };
   }
 
-  if (!updateCarrierHasCategoryChanges(merged)) {
+  if (!updateCarrierHasCategoryChanges(merged, baseCollected)) {
     return {
       ok: false,
       errors: {},

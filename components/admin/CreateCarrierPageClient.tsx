@@ -2,12 +2,14 @@
 
 import { CarrierDetailSections } from "@/components/carrier/CarrierDetailSections";
 import { CreateCarrierDraftForm } from "@/components/carrier/CreateCarrierDraftForm";
+import { createDraftEnumOptions } from "@/lib/datapoints/enum-options-from-reference";
 import {
   buildCreateCarrierDraftFormState,
   mergeCreateCarrierDraftFormIntoCollected,
 } from "@/lib/workflows/create-carrier-draft-form-utils";
+import type { DatapointReferenceMap } from "@/types/zinnia/datapoints";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 function carrierCodeFromPayload(payload: unknown): string {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -18,9 +20,51 @@ function carrierCodeFromPayload(payload: unknown): string {
 }
 
 export function CreateCarrierPageClient() {
-  const [form, setForm] = useState(() =>
-    buildCreateCarrierDraftFormState({}, {}, undefined),
+  const [referenceByKey, setReferenceByKey] = useState<DatapointReferenceMap>(
+    {},
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/datapoints");
+        const data = (await res.json()) as {
+          referenceByKey?: DatapointReferenceMap;
+        };
+        if (cancelled || !res.ok) return;
+        if (data.referenceByKey && typeof data.referenceByKey === "object") {
+          setReferenceByKey(data.referenceByKey);
+        }
+      } catch {
+        /* fall back to OpenAPI enums */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enumOptionsOverride = useMemo(
+    () => createDraftEnumOptions(referenceByKey),
+    [referenceByKey],
+  );
+
+  const [form, setForm] = useState(() =>
+    buildCreateCarrierDraftFormState({}, {}, undefined, {}),
+  );
+
+  useEffect(() => {
+    setForm((prev) =>
+      buildCreateCarrierDraftFormState(
+        mergeCreateCarrierDraftFormIntoCollected({}, prev.values),
+        prev.errors,
+        prev.formLevelError,
+        enumOptionsOverride,
+      ),
+    );
+  }, [enumOptionsOverride]);
+
   const [loading, setLoading] = useState(false);
   const [successPayload, setSuccessPayload] = useState<unknown>(null);
 
@@ -44,6 +88,7 @@ export function CreateCarrierPageClient() {
           (data.fieldErrors as Record<string, string>) ?? {},
           (data.formLevelMessage as string | undefined) ??
             (typeof data.message === "string" ? data.message : undefined),
+          createDraftEnumOptions(referenceByKey),
         ),
       );
     } catch {
@@ -53,12 +98,13 @@ export function CreateCarrierPageClient() {
           merged,
           {},
           "Request failed. Check connection.",
+          createDraftEnumOptions(referenceByKey),
         ),
       );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [referenceByKey]);
 
   const successCode = useMemo(
     () => carrierCodeFromPayload(successPayload),
@@ -84,7 +130,7 @@ export function CreateCarrierPageClient() {
         <div className="flex flex-wrap gap-2">
           {canViewDetails ? (
             <Link
-              href={`/lookup?code=${encodeURIComponent(successCode)}`}
+              href={`/carrier-master/lookup?code=${encodeURIComponent(successCode)}`}
               className="ui-btn-primary inline-flex shrink-0 items-center justify-center no-underline"
             >
               View details
@@ -95,7 +141,14 @@ export function CreateCarrierPageClient() {
             className="ui-btn-secondary"
             onClick={() => {
               setSuccessPayload(null);
-              setForm(buildCreateCarrierDraftFormState({}, {}, undefined));
+              setForm(
+                buildCreateCarrierDraftFormState(
+                  {},
+                  {},
+                  undefined,
+                  createDraftEnumOptions(referenceByKey),
+                ),
+              );
             }}
           >
             Create another carrier
@@ -106,6 +159,11 @@ export function CreateCarrierPageClient() {
   }
 
   return (
-    <CreateCarrierDraftForm form={form} disabled={loading} onSubmit={onSubmit} />
+    <CreateCarrierDraftForm
+      form={form}
+      disabled={loading}
+      referenceByKey={referenceByKey}
+      onSubmit={onSubmit}
+    />
   );
 }

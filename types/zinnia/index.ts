@@ -16,6 +16,7 @@ export { normalizeCarrierListResponse } from "./carriers";
 export type {
   DatapointApiResponse,
   DatapointItem,
+  DatapointReferenceMap,
   DatapointResponse,
 } from "./datapoints";
 export { normalizeDatapointResponse } from "./datapoints";

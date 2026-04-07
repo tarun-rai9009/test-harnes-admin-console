@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { CHAT_AGENT_TITLE } from "@/lib/branding";
+import { APP_DISPLAY_NAME } from "@/lib/branding";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: `${CHAT_AGENT_TITLE} — Test harness`,
+  title: `${APP_DISPLAY_NAME} — Test harness`,
   description:
     "Admin test harness for carrier create, lookup, list, and section updates via Zinnia APIs.",
 };

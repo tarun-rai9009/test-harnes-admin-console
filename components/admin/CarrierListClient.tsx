@@ -81,7 +81,7 @@ export function CarrierListClient() {
               </td>
               <td className="px-4 py-2.5">
                 <Link
-                  href={`/lookup?code=${encodeURIComponent(r.carrierCode)}`}
+                  href={`/carrier-master/lookup?code=${encodeURIComponent(r.carrierCode)}`}
                   className="text-sm font-medium text-accent hover:underline"
                 >
                   View

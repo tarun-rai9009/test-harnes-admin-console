@@ -2,6 +2,7 @@ import {
   type UpdateCategoryId,
   UPDATE_CATEGORY_FIELD_KEYS,
   UPDATE_CATEGORY_LABELS,
+  UPDATE_CATEGORY_ORDER,
 } from "@/lib/workflows/definitions/update-carrier-constants";
 import type {
   CarrierDetails,
@@ -143,13 +144,12 @@ export const UPDATE_FIELD_CONFIRM_LABELS: Record<string, string> = {
   em_emailEndDate: "Email end date",
 };
 
-export function collectedParamsToUpdatePayload(
+/** Partial PUT body for one update section (same rules as the legacy single-category flow). */
+export function partialUpdatePayloadForCategory(
   data: Record<string, unknown>,
+  categoryId: UpdateCategoryId,
 ): UpdateCarrierPayload {
-  const cat = data.updateCategory as UpdateCategoryId | undefined;
-  if (!cat) return {};
-
-  switch (cat) {
+  switch (categoryId) {
     case "basic_details": {
       const base = pickDefined({
         carrierId: str(data, "basic_carrierId"),
@@ -157,11 +157,9 @@ export function collectedParamsToUpdatePayload(
         entityType: str(data, "basic_entityType"),
         carrierName: str(data, "basic_carrierName"),
         lineOfBusiness: str(data, "basic_lineOfBusiness"),
-        productTypes:
-          Array.isArray(data.basic_productTypes) &&
-          (data.basic_productTypes as unknown[]).length
-            ? (data.basic_productTypes as string[])
-            : undefined,
+        productTypes: Array.isArray(data.basic_productTypes)
+          ? (data.basic_productTypes as string[])
+          : undefined,
       });
       return Object.keys(base).length ? { base } : {};
     }
@@ -216,6 +214,17 @@ export function collectedParamsToUpdatePayload(
       return { base: { regulatory: [regulatory] } };
     }
     case "business_holidays": {
+      const putH = data[ME_PUT_KEY.business_holidays];
+      if (Array.isArray(putH) && putH.length > 0) {
+        return {
+          base: {
+            businessHolidays:
+              putH as NonNullable<
+                NonNullable<UpdateCarrierPayload["base"]>["businessHolidays"]
+              >,
+          },
+        };
+      }
       const row = pickDefined({
         holidayName: str(data, "hol_holidayName"),
         holidayType: str(data, "hol_holidayType"),
@@ -305,6 +314,43 @@ export function collectedParamsToUpdatePayload(
   }
 }
 
+export function mergeUpdateCarrierPayloads(
+  partials: UpdateCarrierPayload[],
+): UpdateCarrierPayload {
+  const out: UpdateCarrierPayload = {};
+  for (const p of partials) {
+    if (p.base && Object.keys(p.base).length > 0) {
+      out.base = { ...(out.base ?? {}), ...p.base };
+    }
+    if (p.connectors && Object.keys(p.connectors).length > 0) {
+      out.connectors = { ...(out.connectors ?? {}), ...p.connectors };
+    }
+    if (p.addresses?.length) out.addresses = p.addresses;
+    if (p.phones?.length) out.phones = p.phones;
+    if (p.emails?.length) out.emails = p.emails;
+  }
+  return out;
+}
+
+export function collectedParamsToMergedUpdatePayload(
+  data: Record<string, unknown>,
+  categories: readonly UpdateCategoryId[],
+): UpdateCarrierPayload {
+  const ordered = UPDATE_CATEGORY_ORDER.filter((c) => categories.includes(c));
+  const partials = ordered.map((c) =>
+    partialUpdatePayloadForCategory(data, c),
+  );
+  return mergeUpdateCarrierPayloads(partials);
+}
+
+export function collectedParamsToUpdatePayload(
+  data: Record<string, unknown>,
+): UpdateCarrierPayload {
+  const cat = data.updateCategory as UpdateCategoryId | undefined;
+  if (!cat) return {};
+  return partialUpdatePayloadForCategory(data, cat);
+}
+
 export function updatePayloadHasBody(p: UpdateCarrierPayload): boolean {
   if (p.base && Object.keys(p.base).length) return true;
   if (p.connectors && Object.keys(p.connectors).length) return true;
@@ -321,11 +367,41 @@ export function isUpdateValueProvided(v: unknown): boolean {
   return true;
 }
 
+/** Sorted, trimmed list for comparing product type selections (replace semantics). */
+function normalizeBasicProductTypesForCompare(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => String(x).trim()).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
+  );
+}
+
+function basicProductTypesDiffer(a: unknown, b: unknown): boolean {
+  const na = normalizeBasicProductTypesForCompare(a);
+  const nb = normalizeBasicProductTypesForCompare(b);
+  if (na.length !== nb.length) return true;
+  return na.some((v, i) => v !== nb[i]);
+}
+
 export function updateCarrierHasCategoryChanges(
   data: Record<string, unknown>,
+  baseline?: Record<string, unknown>,
 ): boolean {
   const cat = data.updateCategory;
   if (typeof cat !== "string") return false;
+  if (isMultiEntryCategory(cat as UpdateCategoryId)) {
+    const put = data[ME_PUT_KEY[cat as MultiEntryCategoryId]];
+    return Array.isArray(put) && put.length > 0;
+  }
+  if (
+    baseline &&
+    cat === "basic_details" &&
+    basicProductTypesDiffer(
+      baseline.basic_productTypes,
+      data.basic_productTypes,
+    )
+  ) {
+    return true;
+  }
   const keys = UPDATE_CATEGORY_FIELD_KEYS[cat as UpdateCategoryId];
   if (!keys) return false;
   for (const k of keys) {
@@ -353,6 +429,57 @@ function multiEntryPutToConfirmationRows(
       });
     }
   });
+  return rows;
+}
+
+function formatCollectedValueForConfirm(v: unknown): string {
+  if (Array.isArray(v)) return v.join(", ");
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (v === "Y" || v === "N") return v === "Y" ? "Yes" : "No";
+  return String(v);
+}
+
+/** Confirmation rows when multiple sections were updated in one action. */
+export function buildUpdateConfirmationRowsFromMultiCategoryData(
+  data: Record<string, unknown>,
+  categories: readonly UpdateCategoryId[],
+): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const code = data.carrierCode;
+  if (code != null && String(code).trim() !== "") {
+    rows.push({ label: "Carrier code", value: String(code).toUpperCase() });
+  }
+  const ordered = UPDATE_CATEGORY_ORDER.filter((c) => categories.includes(c));
+  for (const cat of ordered) {
+    rows.push({
+      label: "Section",
+      value: UPDATE_CATEGORY_LABELS[cat],
+    });
+    if (isMultiEntryCategory(cat)) {
+      const put = data[ME_PUT_KEY[cat]];
+      if (Array.isArray(put) && put.length > 0) {
+        rows.push(
+          ...multiEntryPutToConfirmationRows(
+            cat,
+            put.filter(
+              (x): x is Record<string, unknown> =>
+                typeof x === "object" && x !== null && !Array.isArray(x),
+            ),
+          ),
+        );
+      }
+      continue;
+    }
+    const keys = UPDATE_CATEGORY_FIELD_KEYS[cat];
+    for (const key of keys) {
+      if (!isUpdateValueProvided(data[key])) continue;
+      const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
+      rows.push({
+        label,
+        value: formatCollectedValueForConfirm(data[key]),
+      });
+    }
+  }
   return rows;
 }
 
@@ -399,13 +526,10 @@ export function buildUpdateConfirmationRowsFromData(
     for (const key of keys) {
       if (!isUpdateValueProvided(data[key])) continue;
       const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
-      const v = data[key];
-      let display: string;
-      if (Array.isArray(v)) display = v.join(", ");
-      else if (typeof v === "boolean") display = v ? "Yes" : "No";
-      else if (v === "Y" || v === "N") display = v === "Y" ? "Yes" : "No";
-      else display = String(v);
-      rows.push({ label, value: display });
+      rows.push({
+        label,
+        value: formatCollectedValueForConfirm(data[key]),
+      });
     }
   }
   return rows;
@@ -427,6 +551,46 @@ export function buildUpdateSuccessSummaryCardFields(
     value: code ? code.toUpperCase() : "—",
   });
   rows.push({ label: "Carrier name", value: name || "—" });
+
+  const multi = submittedData.updateCategories;
+  if (Array.isArray(multi) && multi.length > 0) {
+    const ids = UPDATE_CATEGORY_ORDER.filter((c) =>
+      multi.some((x) => x === c),
+    );
+    if (ids.length > 0) {
+      rows.push({
+        label: "Sections updated",
+        value: ids.map((c) => UPDATE_CATEGORY_LABELS[c]).join(", "),
+      });
+      for (const cat of ids) {
+        if (isMultiEntryCategory(cat)) {
+          const put = submittedData[ME_PUT_KEY[cat]];
+          if (Array.isArray(put) && put.length > 0) {
+            rows.push(
+              ...multiEntryPutToConfirmationRows(
+                cat,
+                put.filter(
+                  (x): x is Record<string, unknown> =>
+                    typeof x === "object" && x !== null && !Array.isArray(x),
+                ),
+              ),
+            );
+          }
+          continue;
+        }
+        const keys = UPDATE_CATEGORY_FIELD_KEYS[cat];
+        for (const key of keys) {
+          if (!isUpdateValueProvided(submittedData[key])) continue;
+          const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
+          rows.push({
+            label,
+            value: formatCollectedValueForConfirm(submittedData[key]),
+          });
+        }
+      }
+    }
+    return rows;
+  }
 
   const cat = submittedData.updateCategory;
   if (typeof cat === "string" && UPDATE_CATEGORY_LABELS[cat as UpdateCategoryId]) {
@@ -463,13 +627,10 @@ export function buildUpdateSuccessSummaryCardFields(
     for (const key of keys) {
       if (!isUpdateValueProvided(submittedData[key])) continue;
       const label = UPDATE_FIELD_CONFIRM_LABELS[key] ?? key;
-      const v = submittedData[key];
-      let display: string;
-      if (Array.isArray(v)) display = v.join(", ");
-      else if (typeof v === "boolean") display = v ? "Yes" : "No";
-      else if (v === "Y" || v === "N") display = v === "Y" ? "Yes" : "No";
-      else display = String(v);
-      rows.push({ label, value: display });
+      rows.push({
+        label,
+        value: formatCollectedValueForConfirm(submittedData[key]),
+      });
     }
   }
   return rows;

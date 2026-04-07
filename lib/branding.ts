@@ -1,4 +1,4 @@
 /**
- * Chat agent / app title. Import this anywhere the name is shown (UI, metadata, greetings).
+ * Short app name for the shell header and browser title (single source of truth).
  */
-export const CHAT_AGENT_TITLE = "Admin Console Assistance";
+export const APP_DISPLAY_NAME = "Admin Console Assistance";

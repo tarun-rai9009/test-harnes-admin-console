@@ -55,7 +55,9 @@ export function LookupCarrierClient() {
       setCarrier(null);
       return;
     }
-    router.replace(`/lookup?code=${encodeURIComponent(t)}`);
+    router.replace(
+      `/carrier-master/lookup?code=${encodeURIComponent(t)}`,
+    );
     void load(t);
   }
 
@@ -97,7 +99,7 @@ export function LookupCarrierClient() {
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <Link
-              href={`/update?code=${encodeURIComponent(carrier.carrierCode)}`}
+              href={`/carrier-master/update?code=${encodeURIComponent(carrier.carrierCode)}`}
               className="ui-btn-secondary inline-flex shrink-0 items-center justify-center no-underline"
             >
               Update this carrier
