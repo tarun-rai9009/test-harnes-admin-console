@@ -1,9 +1,11 @@
 "use client";
 
+import { carrierGetResponseToCollectedParams } from "@/lib/admin/carrier-get-response-to-collected";
 import {
   distributeFieldErrorsByUpdateCategory,
   primaryMultiEntryCategoryForRowErrors,
 } from "@/lib/admin/update-carrier-flat-field-to-category";
+import { takeUpdateCarrierSessionBootstrap } from "@/lib/admin/update-carrier-session-bootstrap";
 import { buildUpdateSectionFormStateAdmin } from "@/lib/admin/update-section-form-state";
 import { CarrierDetailSections } from "@/components/carrier/CarrierDetailSections";
 import {
@@ -109,6 +111,9 @@ export function UpdateCarrierClient() {
   const [loading, setLoading] = useState(false);
   const [successBanner, setSuccessBanner] = useState("");
   const [reviewHint, setReviewHint] = useState("");
+  const [sectionOpen, setSectionOpen] = useState<
+    Partial<Record<UpdateCategoryId, boolean>>
+  >({});
   const [editNonce, setEditNonce] = useState(0);
   const [referenceByKey, setReferenceByKey] = useState<DatapointReferenceMap>(
     {},
@@ -168,6 +173,7 @@ export function UpdateCarrierClient() {
     setEditSingleOverrides({});
     setEditMultiErrors({});
     setReviewHint("");
+    setSectionOpen({});
     sectionRefs.current = {};
     setEditNonce((n) => n + 1);
   }, []);
@@ -177,39 +183,91 @@ export function UpdateCarrierClient() {
     return typeof c === "string" ? c.toUpperCase() : "";
   }, [carrier, collected]);
 
-  useEffect(() => {
+  const urlCarrierCode = useMemo(() => {
     const q = searchParams.get("code");
-    if (q && /^[A-Za-z0-9]{4}$/.test(q)) {
-      setCodeInput((prev) => (prev ? prev : q.toUpperCase()));
-    }
+    if (!q || !/^[A-Za-z0-9]{4}$/.test(q)) return null;
+    return q.toUpperCase();
   }, [searchParams]);
 
-  const loadCarrier = useCallback(async (code: string) => {
-    setLoading(true);
-    setCodeError("");
-    setSuccessBanner("");
-    try {
-      const res = await fetch(
-        `/api/admin/carriers/${encodeURIComponent(code)}`,
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        setCodeError(
-          typeof data.error === "string" ? data.error : "Request failed.",
+  const loadCarrier = useCallback(
+    async (
+      code: string,
+      options?: {
+        afterLoad?: "detail" | "edit";
+        signal?: AbortSignal;
+      },
+    ) => {
+      const afterLoad = options?.afterLoad ?? "detail";
+      const signal = options?.signal;
+      setLoading(true);
+      setCodeError("");
+      setSuccessBanner("");
+      try {
+        const res = await fetch(
+          `/api/admin/carriers/${encodeURIComponent(code)}`,
+          { signal },
         );
-        return;
+        const data = await res.json();
+        if (signal?.aborted) return;
+        if (!res.ok) {
+          setCodeError(
+            typeof data.error === "string" ? data.error : "Request failed.",
+          );
+          return;
+        }
+        setCarrier(data.carrier as CarrierGetResponse);
+        let nextCollected =
+          (data.collected as Record<string, unknown>) ?? {};
+        if (afterLoad === "edit") {
+          nextCollected = { ...nextCollected };
+          delete nextCollected[ME_PENDING_ROWS_KEY];
+          resetEditSurface();
+          setPhase({ kind: "edit" });
+        } else {
+          setPhase({ kind: "detail" });
+        }
+        setCollected(nextCollected);
+      } catch (e) {
+        if (
+          signal?.aborted ||
+          (e instanceof DOMException && e.name === "AbortError")
+        )
+          return;
+        setCodeError("Network error.");
+      } finally {
+        if (!signal?.aborted) setLoading(false);
       }
-      setCarrier(data.carrier as CarrierGetResponse);
-      setCollected(
-        (data.collected as Record<string, unknown>) ?? {},
-      );
-      setPhase({ kind: "detail" });
-    } catch {
-      setCodeError("Network error.");
-    } finally {
-      setLoading(false);
+    },
+    [resetEditSurface],
+  );
+
+  useEffect(() => {
+    if (!urlCarrierCode) return;
+    setCodeInput(urlCarrierCode);
+
+    const boot = takeUpdateCarrierSessionBootstrap(urlCarrierCode);
+    if (boot) {
+      resetEditSurface();
+      setCarrier(boot);
+      setCodeError("");
+      setSuccessBanner("");
+      const collectedParams = carrierGetResponseToCollectedParams(boot);
+      const next: Record<string, unknown> = { ...collectedParams };
+      delete next[ME_PENDING_ROWS_KEY];
+      setCollected(next);
+      setPhase({ kind: "edit" });
+      return;
     }
-  }, []);
+
+    const ac = new AbortController();
+    void loadCarrier(urlCarrierCode, { afterLoad: "edit", signal: ac.signal });
+    return () => ac.abort();
+  }, [urlCarrierCode, loadCarrier, resetEditSurface]);
+
+  useEffect(() => {
+    if (urlCarrierCode) return;
+    setLoading(false);
+  }, [urlCarrierCode]);
 
   const submitCode = useCallback(
     (e: React.FormEvent) => {
@@ -247,7 +305,7 @@ export function UpdateCarrierClient() {
     setReviewHint("");
     let acc = { ...collected };
     const applied: UpdateCategoryId[] = [];
-    let hadRealError = false;
+    const failedCategories: UpdateCategoryId[] = [];
 
     for (const cat of UPDATE_CATEGORY_ORDER) {
       if (!isUpdateCategoryVisibleInAdminUi(cat)) continue;
@@ -260,10 +318,29 @@ export function UpdateCarrierClient() {
         continue;
       }
       if (isNoChangesFailure(r, noChangesMessage)) continue;
-      hadRealError = true;
+      failedCategories.push(cat);
     }
 
-    if (hadRealError) return;
+    if (failedCategories.length > 0) {
+      const labels = failedCategories.map((id) => UPDATE_CATEGORY_LABELS[id]);
+      setReviewHint(
+        labels.length === 1
+          ? `“${labels[0]}” has validation errors. That section is expanded below — fix the fields, then try Review changes again.`
+          : `These sections have validation errors (expanded below): ${labels.join(", ")}. Fix the fields, then try Review changes again.`,
+      );
+      setSectionOpen((prev) => {
+        const next = { ...prev };
+        for (const id of failedCategories) next[id] = true;
+        return next;
+      });
+      const firstId = failedCategories[0]!;
+      window.setTimeout(() => {
+        document
+          .getElementById(`update-carrier-section-${firstId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+      return;
+    }
     if (applied.length === 0) {
       setReviewHint(
         "No changes to apply. Edit at least one section, then try again.",
@@ -498,7 +575,7 @@ export function UpdateCarrierClient() {
           </div>
 
           <div className="ui-panel">
-            <p className="ui-panel-title">Update sections</p>
+            <p className="ui-panel-title">Choose update section(s)</p>
             <p className="ui-panel-desc">
               <span className="font-mono font-semibold">{activeCode}</span> —
               expand any sections you need. Use <strong>Review changes</strong>{" "}
@@ -514,7 +591,13 @@ export function UpdateCarrierClient() {
           <div className="space-y-3">
             {categories.map((c) => (
               <details
+                id={`update-carrier-section-${c.id}`}
                 key={`${c.id}-${editNonce}`}
+                open={Boolean(sectionOpen[c.id])}
+                onToggle={(e) => {
+                  const el = e.currentTarget;
+                  setSectionOpen((prev) => ({ ...prev, [c.id]: el.open }));
+                }}
                 className="group rounded-xl border border-border bg-surface shadow-sm open:shadow-md"
               >
                 <summary className="cursor-pointer list-none px-4 py-3 font-medium text-foreground [&::-webkit-details-marker]:hidden">

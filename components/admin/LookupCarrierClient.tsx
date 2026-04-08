@@ -1,6 +1,7 @@
 "use client";
 
 import { CarrierDetailSections } from "@/components/carrier/CarrierDetailSections";
+import { writeUpdateCarrierSessionBootstrap } from "@/lib/admin/update-carrier-session-bootstrap";
 import type { CarrierGetResponse } from "@/types/zinnia/carriers";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -101,6 +102,9 @@ export function LookupCarrierClient() {
             <Link
               href={`/carrier-master/update?code=${encodeURIComponent(carrier.carrierCode)}`}
               className="ui-btn-secondary inline-flex shrink-0 items-center justify-center no-underline"
+              onClick={() => {
+                writeUpdateCarrierSessionBootstrap(carrier);
+              }}
             >
               Update this carrier
             </Link>
